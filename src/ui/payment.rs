@@ -17,6 +17,7 @@ pub(super) struct Form {
     mode: Mode,
     cash: String,
     bonuses: String,
+    discount: String,
 }
 
 impl Form {
@@ -40,7 +41,16 @@ impl Form {
                 cash: parse_money(&self.cash)?,
             },
         };
-        Ok(Payment { tender, redeemed })
+        let discount = if self.discount.trim().is_empty() {
+            0
+        } else {
+            parse_money(&self.discount)?
+        };
+        Ok(Payment {
+            tender,
+            redeemed,
+            discount,
+        })
     }
 }
 
@@ -108,11 +118,40 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 } else {
                     0
                 };
-                ui.horizontal_wrapped(|ui| {
-                    ui.selectable_value(&mut form.mode, Mode::Cash, "Готівка");
-                    ui.selectable_value(&mut form.mode, Mode::Card, "Картка");
-                    ui.selectable_value(&mut form.mode, Mode::Split, "Змішана");
+                ui.label("Спосіб оплати");
+                ui.columns(3, |columns| {
+                    for (index, (mode, label)) in [
+                        (Mode::Cash, "Готівка"),
+                        (Mode::Card, "Картка"),
+                        (Mode::Split, "Комбо"),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let ui = &mut columns[index];
+                        let active = form.mode == mode;
+                        let button =
+                            Button::new(egui::RichText::new(label).strong().color(if active {
+                                super::theme::BLACK
+                            } else {
+                                ui.visuals().text_color()
+                            }))
+                            .fill(if active {
+                                super::theme::SIGNAL
+                            } else {
+                                ui.visuals().window_fill
+                            });
+                        if ui.add_sized([ui.available_width(), 42.], button).clicked() {
+                            form.mode = mode;
+                        }
+                    }
                 });
+                ui.label("Знижка");
+                ui.add(
+                    TextEdit::singleline(&mut form.discount)
+                        .hint_text("Сума знижки, ₴")
+                        .char_limit(14),
+                );
                 if form.mode == Mode::Split {
                     ui.add(
                         TextEdit::singleline(&mut form.cash)
@@ -127,6 +166,9 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 });
                 match &result {
                     Ok((_, quote)) => {
+                        if quote.discount > 0 {
+                            ui.label(format!("Знижка: {}", money(quote.discount)));
+                        }
                         ui.strong(format!("До сплати: {}", money(quote.cash + quote.card)));
                         if quote.cash > 0 {
                             ui.label(format!("Готівка: {}", money(quote.cash)));
@@ -171,7 +213,10 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
 }
 
 pub(super) fn label(payment: &PaymentBreakdown) -> String {
-    let mut parts = Vec::with_capacity(3);
+    let mut parts = Vec::with_capacity(4);
+    if payment.discount > 0 {
+        parts.push(format!("Знижка {}", money(payment.discount)));
+    }
     if payment.cash > 0 {
         parts.push(format!("Гот. {}", money(payment.cash)));
     }

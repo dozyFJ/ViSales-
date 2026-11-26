@@ -28,26 +28,42 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
         .frame(palette.panel(9, 6))
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!("ViSales · {}", PAGES[app.page]))
-                        .size(18.)
-                        .strong(),
-                );
-                ui.label(
-                    RichText::new(if app.access.unlocked {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(format!("ViSales · {}", PAGES[app.page]))
+                            .size(16.)
+                            .strong(),
+                    );
+                    let role = if app.access.unlocked {
                         "Адміністратор"
                     } else {
                         "Касир"
-                    })
-                    .size(11.)
-                    .strong(),
-                );
+                    };
+                    let label = if app.page == 0 {
+                        format!("ТЕСТОВИЙ РЕЖИМ · {role}")
+                    } else {
+                        role.to_owned()
+                    };
+                    ui.label(RichText::new(label).size(10.).strong());
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let cart = app.page == 0 && app.portrait_search == Search::Cart;
+                    let quantity: i64 = app.cart.values().map(|(quantity, _)| quantity).sum();
+                    let button = Button::new(
+                        RichText::new(format!("Кошик · {quantity}"))
+                            .strong()
+                            .color(theme::BLACK),
+                    )
+                    .fill(if cart { palette.action } else { theme::MINT })
+                    .stroke(Stroke::new(2.0_f32, theme::BLACK))
+                    .min_size(egui::vec2(0., 39.));
+                    if ui.add(button).clicked() {
+                        app.navigate(0);
+                        app.portrait_search = Search::Cart;
+                        ctx.memory_mut(|memory| memory.surrender_focus(search_id));
+                    }
+                });
             });
-            if app.page == 0 {
-                ui.label(RichText::new("ТЕСТОВИЙ РЕЖИМ").size(10.).strong());
-            } else {
-                ui.add_space(14.);
-            }
             if let Some((ok, status)) = &app.notice {
                 let color = if *ok {
                     palette.ink
@@ -190,7 +206,7 @@ fn dock(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: eg
         .exact_height(DOCK_HEIGHT)
         .frame(palette.panel(7, 5))
         .show(ctx, |ui| {
-            let count = if app.access.unlocked { 4 } else { 3 };
+            let count = if app.access.unlocked { 3 } else { 2 };
             ui.columns(count, |columns| {
                 let cart = app.page == 0 && app.portrait_search == Search::Cart;
                 if dock_button(
@@ -206,14 +222,9 @@ fn dock(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: eg
                     app.stock_menu_open = false;
                     app.settings_menu_open = false;
                 }
-                if dock_button(&mut columns[1], palette, "Кошик", theme::MINT, cart) {
-                    app.navigate(0);
-                    app.portrait_search = Search::Cart;
-                    ctx.memory_mut(|memory| memory.surrender_focus(search_id));
-                }
                 if app.access.unlocked
                     && dock_button(
-                        &mut columns[2],
+                        &mut columns[1],
                         palette,
                         "Склад",
                         theme::SKY,
@@ -269,7 +280,7 @@ fn menu_drawer(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search
         .area(area)
         .frame(palette.panel(12, 8))
         .show(ctx, |ui| {
-            let width = (ctx.screen_rect().width() * 0.69 - 26.).clamp(145., 325.);
+            let width = (ctx.screen_rect().width() - 28.).max(1.);
             ui.set_width(width);
             ui.horizontal(|ui| {
                 ui.heading("Меню");
@@ -966,6 +977,8 @@ mod tests {
         assert!(checkout.y > 620. && product.y < checkout.y);
         let dock_cash = text_position("Каса").expect("dock cash button appears");
         assert!(dock_cash.y > checkout.y);
+        let header_cart = text_position("Кошик · 0").expect("cart button appears in the header");
+        assert!(header_cart.y < product.y);
 
         let _ = frame(vec![egui::Event::PointerMoved(product)]);
         for pressed in [true, false] {

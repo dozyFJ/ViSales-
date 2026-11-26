@@ -45,6 +45,7 @@ pub enum Tender {
 pub struct Payment {
     pub tender: Tender,
     pub redeemed: i64,
+    pub discount: i64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -52,20 +53,26 @@ pub struct PaymentBreakdown {
     pub cash: i64,
     pub card: i64,
     pub redeemed: i64,
+    pub discount: i64,
     pub earned: i64,
 }
 
 impl Payment {
     pub fn quote(self, gross: i64, balance: i64, has_customer: bool) -> Result<PaymentBreakdown> {
         ensure!(
-            self.redeemed >= 0 && self.redeemed <= gross,
+            (0..=gross).contains(&self.discount),
+            "Знижка перевищує суму кошика"
+        );
+        let discounted = gross - self.discount;
+        ensure!(
+            self.redeemed >= 0 && self.redeemed <= discounted,
             "Бонуси перевищують суму кошика"
         );
         ensure!(
             self.redeemed == 0 || (has_customer && self.redeemed <= balance),
             "Недостатньо бонусів"
         );
-        let due = gross - self.redeemed;
+        let due = discounted - self.redeemed;
         let (cash, card) = match self.tender {
             Tender::Cash => (due, 0),
             Tender::Card => (0, due),
@@ -82,6 +89,7 @@ impl Payment {
             cash,
             card,
             redeemed: self.redeemed,
+            discount: self.discount,
             earned,
         })
     }
@@ -621,6 +629,12 @@ impl Store {
                 breakdown.earned
             ],
         )?;
+        if breakdown.discount > 0 {
+            tx.execute(
+                "INSERT INTO sale_discount(sale,amount) VALUES(?1,?2)",
+                params![id, breakdown.discount],
+            )?;
+        }
         tx.commit()?;
         Ok(id)
     }
@@ -662,13 +676,14 @@ impl Store {
 
     pub fn sales(&self) -> Result<Vec<Sale>> {
         let mut q = self.0.prepare(
-            "SELECT sale.id,created,returned_at,SUM(quantity*unit_price)-COALESCE(p.redeemed,0),
-                    SUM(quantity*(unit_price-unit_cost))-COALESCE(p.redeemed,0),customer.name,
-                    p.cash,p.card,p.redeemed,p.earned
+            "SELECT sale.id,created,returned_at,SUM(quantity*unit_price)-COALESCE(p.redeemed,0)-COALESCE(d.amount,0),
+                    SUM(quantity*(unit_price-unit_cost))-COALESCE(p.redeemed,0)-COALESCE(d.amount,0),customer.name,
+                    p.cash,p.card,p.redeemed,p.earned,COALESCE(d.amount,0)
              FROM sale JOIN sale_line ON sale.id=sale_line.sale
              LEFT JOIN sale_customer ON sale_customer.sale=sale.id
              LEFT JOIN customer ON customer.id=sale_customer.customer
              LEFT JOIN sale_payment p ON p.sale=sale.id
+             LEFT JOIN sale_discount d ON d.sale=sale.id
              GROUP BY sale.id ORDER BY sale.id DESC",
         )?;
         Ok(q.query_map([], |r| {
@@ -678,6 +693,7 @@ impl Store {
                     card: r.get(7)?,
                     redeemed: r.get(8)?,
                     earned: r.get(9)?,
+                    discount: r.get(10)?,
                 })
             } else {
                 None
@@ -762,11 +778,12 @@ mod tests {
         let mixed = Payment {
             tender: Tender::Split { cash: 1 },
             redeemed: balance,
+            discount: 200,
         };
         assert!(store.sell(&cart, None, None, mixed).is_err());
         let second = store.sell(&cart, Some(customer), None, mixed)?;
         let sales = store.sales()?;
-        let due = p.price - balance;
+        let due = p.price - balance - mixed.discount;
         assert_eq!(sales[0].total, due);
         let lines = store.receipt_lines(second)?;
         assert_eq!(lines.len(), 1);
@@ -780,6 +797,7 @@ mod tests {
                 cash: 1,
                 card: due - 1,
                 redeemed: balance,
+                discount: mixed.discount,
                 earned: due / 100
             })
         );
