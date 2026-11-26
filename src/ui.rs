@@ -948,6 +948,16 @@ impl eframe::App for ViSales {
         }
         let screen = ctx.screen_rect();
         let portrait = screen.width() < screen.height();
+        #[cfg(target_os = "android")]
+        let portrait = match self
+            .android_app
+            .as_ref()
+            .map(|app| app.config().orientation())
+        {
+            Some(ndk::configuration::Orientation::Port) => true,
+            Some(ndk::configuration::Orientation::Land) => false,
+            _ => portrait,
+        };
         if portrait {
             portrait_pos::show(self, ctx);
             payment::show(self, ctx);
