@@ -1017,17 +1017,29 @@ impl eframe::App for ViSales {
                     ui.visuals().error_fg_color
                 }));
             }
-            egui::ScrollArea::vertical()
-                .id_salt(self.page)
-                .show(ui, |ui| {
-                    if self.store.is_none() {
-                        return;
-                    }
+            let desk_panel = self.desktop_sale_panel.map(|panel| match panel {
+                sale_details::Panel::Customers => "customers",
+                sale_details::Panel::Parked => "parked",
+                sale_details::Panel::Receipts => "receipts",
+            });
+            page_scroll(ui, (self.page, desk_panel, self.receipt_id), |ui| {
+                if self.store.is_some() {
                     self.render_page(ui);
-                });
+                }
+            });
         });
         payment::show(self, ctx);
     }
+}
+
+fn page_scroll(ui: &mut Ui, id: impl std::hash::Hash, content: impl FnOnce(&mut Ui)) {
+    egui::ScrollArea::vertical()
+        .id_salt(id)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            content(ui);
+            ui.add_space(16.);
+        });
 }
 
 fn card(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
@@ -1047,6 +1059,8 @@ fn field(ui: &mut Ui, value: &mut String, label: &str) {
 
 fn product_select(ui: &mut Ui, id: &str, products: &[Product], selected: &mut i64) {
     egui::ComboBox::from_id_salt(id)
+        .width(ui.available_width().min(250.))
+        .truncate()
         .selected_text(
             products
                 .iter()
@@ -1067,6 +1081,22 @@ fn product_select(ui: &mut Ui, id: &str, products: &[Product], selected: &mut i6
 
 fn table(ui: &mut Ui, columns: &[&str], rows: usize, mut cell: impl FnMut(&mut Ui, usize, usize)) {
     ui.push_id(columns, |ui| {
+        if ui.available_width() < 520. {
+            for row in 0..rows {
+                ui.push_id(row, |ui| {
+                    card(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        for (column, label) in columns.iter().enumerate() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.weak(*label);
+                                cell(ui, row, column);
+                            });
+                        }
+                    });
+                });
+            }
+            return;
+        }
         egui::ScrollArea::horizontal().show(ui, |ui| {
             let width = (ui.available_width() / columns.len() as f32 - 10.).max(105.);
             TableBuilder::new(ui)
@@ -1105,4 +1135,78 @@ fn matches(p: &Product, query: &str) -> bool {
 
 fn decimal(value: i64) -> String {
     format!("{},{:02}", value / 100, value % 100)
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::*;
+
+    #[test]
+    fn narrow_records_reach_the_last_action_with_vertical_scroll() {
+        let ctx = egui::Context::default();
+        let pointer = egui::pos2(110., 140.);
+        let mut time = 0.;
+        let mut frame = |events| {
+            time += 0.033;
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(216., 320.),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        page_scroll(ui, "narrow-stock", |ui| {
+                            table(
+                                ui,
+                                &["Товар", "Кількість", "Дія"],
+                                30,
+                                |ui, row, column| match column {
+                                    0 => {
+                                        ui.label(format!("Товар №{}", row + 1));
+                                    }
+                                    1 => {
+                                        ui.label("24");
+                                    }
+                                    _ => {
+                                        let _ = ui.button(format!("Дія №{}", row + 1));
+                                    }
+                                },
+                            );
+                        });
+                    });
+                },
+            )
+        };
+        let visible = |output: &egui::FullOutput, label: &str| {
+            output.shapes.iter().any(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => {
+                    shape.clip_rect.contains(text.pos + text.galley.size() / 2.)
+                }
+                _ => false,
+            })
+        };
+        let _ = frame(vec![egui::Event::PointerMoved(pointer)]);
+        let before = frame(Vec::new());
+        assert!(visible(&before, "Товар №1"));
+        assert!(!visible(&before, "Дія №30"));
+        let _ = frame(vec![
+            egui::Event::PointerMoved(pointer),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0., -12_000.),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        for _ in 0..20 {
+            let _ = frame(Vec::new());
+        }
+        let after = frame(Vec::new());
+        assert!(visible(&after, "Дія №30"));
+        assert!(!visible(&after, "Товар №1"));
+    }
 }

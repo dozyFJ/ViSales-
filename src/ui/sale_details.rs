@@ -91,19 +91,15 @@ fn customers(app: &mut ViSales, ui: &mut Ui) {
     }
     let query = app.customer_name.trim().to_lowercase();
     let mut selected = None;
-    egui::ScrollArea::vertical()
-        .id_salt("pos-customers")
-        .show(ui, |ui| {
-            for (id, name) in &app.customers {
-                if (query.is_empty() || name.to_lowercase().contains(&query))
-                    && ui
-                        .selectable_label(app.customer == Some(*id), format!("{name} · №{id}"))
-                        .clicked()
-                {
-                    selected = Some(*id);
-                }
-            }
-        });
+    for (id, name) in &app.customers {
+        if (query.is_empty() || name.to_lowercase().contains(&query))
+            && ui
+                .selectable_label(app.customer == Some(*id), format!("{name} · №{id}"))
+                .clicked()
+        {
+            selected = Some(*id);
+        }
+    }
     if let Some(id) = selected {
         app.customer = Some(id);
         app.customer_name.clear();
@@ -135,31 +131,27 @@ fn parked(app: &mut ViSales, ui: &mut Ui) {
         ui.weak("Відкладених кошиків ще немає.");
     }
     let mut resume = None;
-    egui::ScrollArea::vertical()
-        .id_salt("parked-carts")
-        .show(ui, |ui| {
-            for cart in carts {
-                ui.group(|ui| {
-                    ui.strong(format!(
-                        "#{} · {} · {} шт.",
-                        cart.id,
-                        money(cart.total),
-                        cart.units
-                    ));
-                    ui.label(format!(
-                        "{} · {} UTC",
-                        customer_name(app, cart.customer),
-                        cart.saved_at
-                    ));
-                    if ui
-                        .add_enabled(can_resume, egui::Button::new("Відновити"))
-                        .clicked()
-                    {
-                        resume = Some(cart.id);
-                    }
-                });
+    for cart in carts {
+        ui.group(|ui| {
+            ui.strong(format!(
+                "#{} · {} · {} шт.",
+                cart.id,
+                money(cart.total),
+                cart.units
+            ));
+            ui.label(format!(
+                "{} · {} UTC",
+                customer_name(app, cart.customer),
+                cart.saved_at
+            ));
+            if ui
+                .add_enabled(can_resume, egui::Button::new("Відновити"))
+                .clicked()
+            {
+                resume = Some(cart.id);
             }
         });
+    }
     if let Some(id) = resume {
         let result = (|| {
             ensure!(app.cart.is_empty(), "Поточний кошик ще не порожній");
@@ -200,21 +192,17 @@ fn receipts(app: &mut ViSales, ui: &mut Ui) {
         };
         match store.receipt_lines(id) {
             Ok(lines) => {
-                egui::ScrollArea::vertical()
-                    .max_height((ui.available_height() - 88.).max(64.))
-                    .show(ui, |ui| {
-                        for line in lines {
-                            ui.group(|ui| {
-                                ui.strong(line.name);
-                                ui.label(format!(
-                                    "{} × {} = {}",
-                                    line.quantity,
-                                    money(line.unit_price),
-                                    money(line.quantity * line.unit_price)
-                                ));
-                            });
-                        }
+                for line in lines {
+                    ui.group(|ui| {
+                        ui.strong(line.name);
+                        ui.label(format!(
+                            "{} × {} = {}",
+                            line.quantity,
+                            money(line.unit_price),
+                            money(line.quantity * line.unit_price)
+                        ));
                     });
+                }
             }
             Err(error) => {
                 ui.label(error.to_string());
@@ -231,26 +219,24 @@ fn receipts(app: &mut ViSales, ui: &mut Ui) {
     if app.sales.is_empty() {
         ui.weak("Збережені чеки з’являться після розрахунку.");
     }
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        for sale in &app.sales {
-            let client = sale.customer.as_deref().unwrap_or("Без клієнта");
-            let status = if sale.returned.is_some() {
-                " · Повернено"
-            } else {
-                ""
-            };
-            if ui
-                .button(format!(
-                    "№{} · {}{status}\n{} · {}",
-                    sale.id,
-                    money(sale.total),
-                    client,
-                    sale.created
-                ))
-                .clicked()
-            {
-                app.receipt_id = Some(sale.id);
-            }
+    for sale in &app.sales {
+        let client = sale.customer.as_deref().unwrap_or("Без клієнта");
+        let status = if sale.returned.is_some() {
+            " · Повернено"
+        } else {
+            ""
+        };
+        if ui
+            .button(format!(
+                "№{} · {}{status}\n{} · {}",
+                sale.id,
+                money(sale.total),
+                client,
+                sale.created
+            ))
+            .clicked()
+        {
+            app.receipt_id = Some(sale.id);
         }
-    });
+    }
 }

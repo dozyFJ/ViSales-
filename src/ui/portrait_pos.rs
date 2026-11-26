@@ -257,12 +257,10 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 return;
             }
             if app.page != 0 {
-                egui::ScrollArea::vertical()
-                    .id_salt(app.page)
-                    .show(ui, |ui| {
-                        ui.heading(PAGES[app.page]);
-                        app.render_page(ui);
-                    });
+                super::page_scroll(ui, ("admin", app.page), |ui| {
+                    ui.heading(PAGES[app.page]);
+                    app.render_page(ui);
+                });
                 return;
             }
             if app.portrait_search == Search::Cart {
@@ -278,7 +276,19 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 _ => None,
             };
             if let Some(panel) = panel {
-                super::sale_details::show(app, ui, panel);
+                let screen = match panel {
+                    super::sale_details::Panel::Customers => "customers",
+                    super::sale_details::Panel::Parked => "parked",
+                    super::sale_details::Panel::Receipts => "receipts",
+                };
+                let receipt = if screen == "receipts" {
+                    app.receipt_id
+                } else {
+                    None
+                };
+                super::page_scroll(ui, (screen, receipt), |ui| {
+                    super::sale_details::show(app, ui, panel)
+                });
                 return;
             }
             if app.portrait_search == Search::Browse {
@@ -515,7 +525,9 @@ fn product_list(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode
     }
 
     let mut selected = None;
-    let mut scroll = egui::ScrollArea::vertical().id_salt("pos-products");
+    let mut scroll = egui::ScrollArea::vertical()
+        .id_salt("pos-products")
+        .auto_shrink([false, false]);
     if query_changed {
         scroll = scroll.vertical_scroll_offset(0.);
     }
@@ -622,6 +634,61 @@ mod tests {
     use super::*;
     use crate::store::{Product, Store};
     use std::path::Path;
+
+    #[test]
+    fn major_portrait_pages_render_in_a_short_viewport() -> anyhow::Result<()> {
+        let directory = std::env::temp_dir().join(format!("visales-pages-{}", std::process::id()));
+        let mut app = ViSales::open(directory.clone());
+        app.login.authenticated = true;
+        app.access.unlocked = true;
+        app.store()?.add_demo_products()?;
+        app.refresh()?;
+        let ctx = egui::Context::default();
+        let frame = |app: &mut ViSales| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(320., 460.),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| show(app, ctx),
+            )
+        };
+        let contains = |output: &egui::FullOutput, label: &str| {
+            output.shapes.iter().any(|shape|
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label))
+        };
+        for (page, expected) in [
+            (1, "Картка товару"),
+            (2, "Перерахунок залишку"),
+            (3, "Постачальники"),
+            (4, "Виторг"),
+            (5, "Обмін Excel"),
+            (6, "Змінити PIN адміністратора"),
+        ] {
+            app.navigate(page);
+            let _ = frame(&mut app);
+            assert!(contains(&frame(&mut app), expected), "{page}: {expected}");
+        }
+        app.navigate(0);
+        for (mode, expected) in [
+            (Search::Browse, "Назва або код"),
+            (Search::Barcode, "Штрихкод"),
+            (Search::Cart, "Кошик порожній"),
+            (Search::Customers, "Без клієнта"),
+            (Search::Parked, "Відкладені кошики"),
+            (Search::Receipts, "Тестові чеки"),
+        ] {
+            app.portrait_search = mode;
+            let _ = frame(&mut app);
+            assert!(contains(&frame(&mut app), expected), "{expected}");
+        }
+        drop(app);
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
 
     #[test]
     fn portrait_chrome_stays_in_place_when_notice_and_total_change() -> anyhow::Result<()> {
