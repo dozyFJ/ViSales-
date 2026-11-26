@@ -6,12 +6,14 @@ use eframe::egui::{self, Ui};
 pub(super) enum Panel {
     Customers,
     Parked,
+    Receipts,
 }
 
 pub(super) fn show(app: &mut ViSales, ui: &mut Ui, panel: Panel) {
     match panel {
         Panel::Customers => customers(app, ui),
         Panel::Parked => parked(app, ui),
+        Panel::Receipts => receipts(app, ui),
     }
 }
 
@@ -26,26 +28,31 @@ pub(super) fn cart_actions(app: &mut ViSales, ui: &mut Ui) {
             ui.label(format!("Клієнт: {}", customer_name(app, Some(id))));
         }
         if ui
-            .add_enabled(!app.cart.is_empty(), egui::Button::new("Відкласти кошик"))
+            .add_enabled(!app.cart.is_empty(), egui::Button::new("Відкласти чек"))
             .clicked()
         {
-            let result = (|| {
-                let id = app
-                    .store
-                    .as_mut()
-                    .context("Сховище недоступне")?
-                    .park_cart(&app.cart, app.customer, app.parked_cart)?;
-                app.cart.clear();
-                app.customer = None;
-                app.parked_cart = None;
-                app.portrait_search = Search::Browse;
-                app.search.clear();
-                app.pos_tab = 0;
-                Ok(format!("Кошик №{id} відкладено"))
-            })();
-            app.result(result);
+            park_current(app, app.customer);
         }
     });
+}
+
+pub(super) fn park_current(app: &mut ViSales, customer: Option<i64>) {
+    let result = (|| {
+        let id = app
+            .store
+            .as_mut()
+            .context("Сховище недоступне")?
+            .park_cart(&app.cart, customer, app.parked_cart)?;
+        app.cart.clear();
+        app.customer = None;
+        app.parked_cart = None;
+        app.desktop_sale_panel = None;
+        app.portrait_search = Search::Browse;
+        app.search.clear();
+        app.pos_tab = 0;
+        Ok(format!("Кошик №{id} відкладено"))
+    })();
+    app.result(result);
 }
 
 fn customers(app: &mut ViSales, ui: &mut Ui) {
@@ -165,4 +172,85 @@ fn parked(app: &mut ViSales, ui: &mut Ui) {
         })();
         app.result(result);
     }
+}
+
+fn receipts(app: &mut ViSales, ui: &mut Ui) {
+    if let Some(id) = app.receipt_id {
+        if ui.button("До списку чеків").clicked() {
+            app.receipt_id = None;
+            return;
+        }
+        let Some(sale) = app.sales.iter().find(|sale| sale.id == id) else {
+            ui.weak("Чек недоступний.");
+            return;
+        };
+        ui.heading(format!("Тестовий чек №{id}"));
+        ui.weak("Нефіскальний · локальний");
+        ui.label(format!("{} UTC", sale.created));
+        ui.label(format!(
+            "Клієнт: {}",
+            sale.customer.as_deref().unwrap_or("Без клієнта")
+        ));
+        if sale.returned.is_some() {
+            ui.strong("Повернено");
+        }
+        ui.separator();
+        let Some(store) = &app.store else {
+            return;
+        };
+        match store.receipt_lines(id) {
+            Ok(lines) => {
+                egui::ScrollArea::vertical()
+                    .max_height((ui.available_height() - 88.).max(64.))
+                    .show(ui, |ui| {
+                        for line in lines {
+                            ui.group(|ui| {
+                                ui.strong(line.name);
+                                ui.label(format!(
+                                    "{} × {} = {}",
+                                    line.quantity,
+                                    money(line.unit_price),
+                                    money(line.quantity * line.unit_price)
+                                ));
+                            });
+                        }
+                    });
+            }
+            Err(error) => {
+                ui.label(error.to_string());
+            }
+        }
+        ui.strong(format!("Усього: {}", money(sale.total)));
+        if let Some(payment) = &sale.payment {
+            ui.label(super::payment::label(payment));
+        }
+        return;
+    }
+
+    ui.heading("Тестові чеки");
+    if app.sales.is_empty() {
+        ui.weak("Збережені чеки з’являться після розрахунку.");
+    }
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for sale in &app.sales {
+            let client = sale.customer.as_deref().unwrap_or("Без клієнта");
+            let status = if sale.returned.is_some() {
+                " · Повернено"
+            } else {
+                ""
+            };
+            if ui
+                .button(format!(
+                    "№{} · {}{status}\n{} · {}",
+                    sale.id,
+                    money(sale.total),
+                    client,
+                    sale.created
+                ))
+                .clicked()
+            {
+                app.receipt_id = Some(sale.id);
+            }
+        }
+    });
 }

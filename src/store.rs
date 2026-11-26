@@ -86,6 +86,12 @@ impl Payment {
     }
 }
 
+pub struct ReceiptLine {
+    pub name: String,
+    pub quantity: i64,
+    pub unit_price: i64,
+}
+
 pub struct Sale {
     pub id: i64,
     pub created: String,
@@ -556,6 +562,21 @@ impl Store {
         Ok(())
     }
 
+    pub fn receipt_lines(&self, sale: i64) -> Result<Vec<ReceiptLine>> {
+        let mut query = self.0.prepare(
+            "SELECT name,quantity,unit_price FROM sale_line WHERE sale=?1 ORDER BY product",
+        )?;
+        Ok(query
+            .query_map([sale], |row| {
+                Ok(ReceiptLine {
+                    name: row.get(0)?,
+                    quantity: row.get(1)?,
+                    unit_price: row.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn sales(&self) -> Result<Vec<Sale>> {
         let mut q = self.0.prepare(
             "SELECT sale.id,created,returned_at,SUM(quantity*unit_price)-COALESCE(p.redeemed,0),
@@ -625,6 +646,12 @@ mod tests {
         let sales = store.sales()?;
         let due = p.price - balance;
         assert_eq!(sales[0].total, due);
+        let lines = store.receipt_lines(second)?;
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            (&lines[0].name, lines[0].quantity, lines[0].unit_price),
+            (&p.name, 1, p.price)
+        );
         assert_eq!(
             sales[0].payment,
             Some(PaymentBreakdown {

@@ -13,12 +13,20 @@ enum Mode {
 
 #[derive(Default)]
 pub(super) struct Form {
+    customer: Option<i64>,
     mode: Mode,
     cash: String,
     bonuses: String,
 }
 
 impl Form {
+    pub(super) fn new(customer: Option<i64>) -> Self {
+        Self {
+            customer,
+            ..Self::default()
+        }
+    }
+
     fn payment(&self) -> Result<Payment> {
         let redeemed = if self.bonuses.trim().is_empty() {
             0
@@ -45,13 +53,32 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
     }
     let mut action = None;
     let mut cancel = false;
+    let mut park = false;
     let response = egui::Modal::new(egui::Id::new("pos-payment")).show(ctx, |ui| {
         ui.set_width((ctx.screen_rect().width() - 40.).clamp(180., 360.));
         ui.heading("Тестовий розрахунок");
         ui.label("Локальний запис · без списання коштів");
         let gross = app.cart_total();
         ui.label(format!("Сума кошика: {}", money(gross)));
-        let balance = if let Some(customer) = app.customer {
+        let previous_customer = form.customer;
+        let customer_label = app
+            .customers
+            .iter()
+            .find(|(id, _)| Some(*id) == form.customer)
+            .map_or("Без клієнта", |(_, name)| name.as_str());
+        ui.label("Клієнт для чека");
+        egui::ComboBox::from_id_salt("payment-customer")
+            .selected_text(customer_label)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut form.customer, None, "Без клієнта");
+                for (id, name) in &app.customers {
+                    ui.selectable_value(&mut form.customer, Some(*id), format!("{name} · №{id}"));
+                }
+            });
+        if previous_customer != form.customer {
+            form.bonuses.clear();
+        }
+        let balance = if let Some(customer) = form.customer {
             match app.store().and_then(|store| store.customer_bonus(customer)) {
                 Ok(balance) => {
                     ui.label(format!("Бонусний баланс: {}", money(balance)));
@@ -85,7 +112,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
         }
         let result = form.payment().and_then(|payment| {
             payment
-                .quote(gross, balance, app.customer.is_some())
+                .quote(gross, balance, form.customer.is_some())
                 .map(|quote| (payment, quote))
         });
         match &result {
@@ -115,14 +142,17 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             {
                 action = result.ok().map(|(payment, _)| payment);
             }
+            park = ui.button("Відкласти чек").clicked();
             cancel = ui.button("Скасувати").clicked();
         });
     });
     if cancel || response.should_close() {
         return;
     }
-    if let Some(payment) = action {
-        app.checkout(payment);
+    if park {
+        super::sale_details::park_current(app, form.customer);
+    } else if let Some(payment) = action {
+        app.checkout(payment, form.customer);
     }
     if !app.cart.is_empty() {
         app.payment_form = Some(form);

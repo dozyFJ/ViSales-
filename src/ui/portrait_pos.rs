@@ -10,6 +10,7 @@ pub(super) enum Search {
     Cart,
     Customers,
     Parked,
+    Receipts,
 }
 
 const ACCENTS: [Color32; 3] = [
@@ -148,6 +149,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                             (Search::Cart, "Кошик"),
                             (Search::Parked, "Відкладені"),
                             (Search::Customers, "Клієнти"),
+                            (Search::Receipts, "Чеки"),
                             (Search::Product, "Пошук"),
                             (Search::Barcode, "Штрихкод"),
                         ] {
@@ -259,6 +261,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             let panel = match app.portrait_search {
                 Search::Customers => Some(super::sale_details::Panel::Customers),
                 Search::Parked => Some(super::sale_details::Panel::Parked),
+                Search::Receipts => Some(super::sale_details::Panel::Receipts),
                 _ => None,
             };
             if let Some(panel) = panel {
@@ -267,25 +270,40 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             }
             if app.portrait_search == Search::Browse {
                 ui.heading("Вибрати товар");
-                grid(app, ui, &palette, false);
-                return;
             }
             let barcode = app.portrait_search == Search::Barcode;
-            let input = ui.add(
-                TextEdit::singleline(&mut app.search)
-                    .id(search_id)
-                    .desired_width(f32::INFINITY)
-                    .hint_text(if barcode {
-                        "Введіть штрихкод"
+            ui.horizontal(|ui| {
+                let width = (ui.available_width() - 42.).max(50.);
+                let input = ui.add_sized(
+                    [width, 34.],
+                    TextEdit::singleline(&mut app.search)
+                        .id(search_id)
+                        .hint_text(if barcode {
+                            "Штрихкод"
+                        } else {
+                            "Назва або код"
+                        }),
+                );
+                let enter =
+                    input.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                let add = ui
+                    .add_enabled(
+                        !app.search.trim().is_empty(),
+                        Button::new("+").min_size(egui::vec2(32., 34.)),
+                    )
+                    .on_hover_text("Додати товар");
+                if enter || add.clicked() {
+                    if barcode {
+                        app.add_barcode();
                     } else {
-                        "Знайти товар"
-                    }),
-            );
-            if input.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                app.add_barcode();
-                input.request_focus();
-            }
-            grid(app, ui, &palette, barcode);
+                        add_quick_product(app);
+                    }
+                    if enter {
+                        input.request_focus();
+                    }
+                }
+            });
+            product_list(app, ui, &palette, barcode);
         });
 }
 
@@ -417,13 +435,42 @@ fn sale_table(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette) {
     }
 }
 
-fn grid(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode: bool) {
-    const ROW_HEIGHT: f32 = 38.;
-    let query = if app.portrait_search == Search::Browse {
-        String::new()
+fn add_quick_product(app: &mut ViSales) {
+    let query = app.search.trim().to_lowercase();
+    if query.is_empty() {
+        return;
+    }
+
+    let exact_barcode = app
+        .products
+        .iter()
+        .find(|product| product.barcode.eq_ignore_ascii_case(&query));
+    let product = if exact_barcode.is_some() {
+        exact_barcode
     } else {
-        app.search.trim().to_lowercase()
+        let mut found = app
+            .products
+            .iter()
+            .filter(|product| matches(product, &query));
+        let first = found.next();
+        if found.next().is_some() {
+            app.notice = Some((false, "Виберіть потрібний товар зі списку".into()));
+            return;
+        }
+        first
     };
+    if let Some(product) = product.cloned() {
+        if app.add(&product) {
+            app.notice = None;
+            app.search.clear();
+        }
+    } else {
+        app.notice = Some((false, "Товарів не знайдено".into()));
+    }
+}
+
+fn product_list(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode: bool) {
+    let query = app.search.trim().to_lowercase();
     let products: Vec<_> = app
         .products
         .iter()
@@ -431,75 +478,88 @@ fn grid(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode: bool) 
             if barcode {
                 product.barcode.starts_with(&query)
             } else {
-                matches(product, &query)
+                query.is_empty() || matches(product, &query)
             }
         })
         .collect();
-    let mut selected = None;
+
     if products.is_empty() {
-        ui.label(if query.is_empty() {
+        ui.weak(if query.is_empty() {
             "Додайте товар у каталозі."
         } else {
             "Товарів не знайдено."
         });
+        return;
     }
-    ui.spacing_mut().item_spacing = egui::vec2(1., 1.);
-    let width = (ui.available_width() - 13.).max(90.);
-    let rows = products
-        .len()
-        .max(((ui.available_height() - 28.).max(0.) / ROW_HEIGHT).ceil() as usize);
-    TableBuilder::new(ui)
-        .auto_shrink([false, false])
-        .striped(true)
-        .column(Column::exact(24.).clip(true))
-        .column(Column::remainder().clip(true))
-        .column(Column::exact(width * 0.30).clip(true))
-        .column(Column::exact(width * 0.21).clip(true))
-        .header(29., |mut header| {
-            for (index, label) in ["№", "Товар", "Ціна", "Запас"].into_iter().enumerate()
-            {
-                header.col(|ui| {
-                    sheet_header(ui, palette, label, index.checked_sub(1).map(|i| ACCENTS[i]))
-                });
-            }
-        })
-        .body(|body| {
-            body.rows(ROW_HEIGHT, rows, |mut row| {
-                let product = products.get(row.index()).copied();
-                let number = row.index() + 1;
-                let values = product
-                    .map(|p| [p.name.clone(), money(p.price), p.stock.to_string()])
-                    .unwrap_or_default();
-                row.col(|ui| {
-                    sheet_border(ui, palette);
-                    ui.centered_and_justified(|ui| {
-                        ui.weak(number.to_string());
-                    });
-                });
-                for (index, value) in values.into_iter().enumerate() {
-                    row.col(|ui| {
-                        sheet_border(ui, palette);
-                        let label = Label::new(RichText::new(value).size(12.).color(palette.ink))
+
+    let mut selected = None;
+    egui::ScrollArea::vertical()
+        .id_salt("pos-products")
+        .show_rows(ui, 64., products.len(), |ui, range| {
+            for product in &products[range] {
+                let stock = if product.stock > 0 {
+                    format!("{} шт.", product.stock)
+                } else {
+                    "Немає в наявності".into()
+                };
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 64.),
+                    egui::Sense::hover(),
+                );
+                let clickable = product.stock > 0;
+                let response = ui.interact(
+                    rect,
+                    ui.make_persistent_id(("product", product.id)),
+                    if clickable {
+                        egui::Sense::click()
+                    } else {
+                        egui::Sense::hover()
+                    },
+                );
+                let fill = if clickable && response.hovered() {
+                    palette.rail.lerp_to_gamma(palette.action, 0.14)
+                } else {
+                    palette.rail
+                };
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, 0., fill);
+                painter.vline(
+                    rect.left() + 1.,
+                    rect.y_range(),
+                    Stroke::new(2.0_f32, if clickable { ACCENTS[1] } else { palette.line }),
+                );
+                let content = rect.shrink2(egui::vec2(10., 6.));
+                let mut details = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt(product.id)
+                        .max_rect(content)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                );
+                details.set_clip_rect(details.clip_rect().intersect(content));
+                details.add(
+                    Label::new(RichText::new(&product.name).strong().color(palette.ink))
+                        .truncate()
+                        .selectable(false),
+                );
+                details.horizontal(|ui| {
+                    ui.label(RichText::new(money(product.price)).strong());
+                    ui.add(
+                        Label::new(RichText::new(&stock).weak())
                             .truncate()
-                            .sense(if product.is_some() {
-                                egui::Sense::click()
-                            } else {
-                                egui::Sense::hover()
-                            });
-                        let response = if index == 0 {
-                            ui.add_sized(ui.available_size(), label)
-                        } else {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.add(label)
-                            })
-                            .inner
-                        };
-                        if response.clicked() {
-                            selected = product.cloned();
-                        }
-                    });
+                            .selectable(false),
+                    );
+                });
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        clickable,
+                        format!("{} · {} · {}", product.name, money(product.price), stock),
+                    )
+                });
+                if response.clicked() {
+                    selected = Some((*product).clone());
                 }
-            })
+            }
         });
     if let Some(product) = selected {
         app.add(&product);
@@ -542,7 +602,7 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn portrait_grid_adds_a_product_and_keeps_checkout_below_it() -> anyhow::Result<()> {
+    fn portrait_list_adds_a_product_and_keeps_checkout_below_it() -> anyhow::Result<()> {
         let ctx = egui::Context::default();
         ctx.set_visuals(visuals(true));
         let mut store = Store::open(Path::new(":memory:"))?;
@@ -586,7 +646,8 @@ mod tests {
                 None
             })
         };
-        let _ = text_position("№").expect("spreadsheet row-number column appears");
+        assert!(text_position("№").is_none());
+        assert!(text_position("3 шт.").is_some());
         let product = text_position("Кава").expect("catalogue row appears in portrait");
         let checkout = text_position("Тестовий розрахунок").expect("checkout stays visible");
         assert!(checkout.y > 680. && product.y < checkout.y);
@@ -602,6 +663,13 @@ mod tests {
                 },
             ]);
         }
+        assert_eq!(app.cart_total(), 6900);
+        app.search = "кав".into();
+        add_quick_product(&mut app);
+        assert_eq!(app.cart_total(), 13_800);
+        app.cart.clear();
+        app.search = "123".into();
+        add_quick_product(&mut app);
         assert_eq!(app.cart_total(), 6900);
         app.navigate(2);
         assert_eq!(app.page, admin::PAGE);

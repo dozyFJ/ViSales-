@@ -79,6 +79,7 @@ pub struct ViSales {
     customer_name: String,
     parked_cart: Option<crate::store::ParkedRef>,
     desktop_sale_panel: Option<sale_details::Panel>,
+    receipt_id: Option<i64>,
     pos_tab: usize,
     scanned_row: Option<(i64, f64)>,
     scroll_to_scan: Option<i64>,
@@ -132,6 +133,7 @@ impl ViSales {
             customer_name: String::new(),
             parked_cart: None,
             desktop_sale_panel: None,
+            receipt_id: None,
             pos_tab: 0,
             scanned_row: None,
             scroll_to_scan: None,
@@ -261,6 +263,7 @@ impl ViSales {
             for (panel, label) in [
                 (sale_details::Panel::Customers, "Клієнти"),
                 (sale_details::Panel::Parked, "Відкладені"),
+                (sale_details::Panel::Receipts, "Чеки"),
             ] {
                 if ui
                     .selectable_label(self.desktop_sale_panel == Some(panel), label)
@@ -427,14 +430,14 @@ impl ViSales {
 
     fn open_payment(&mut self) {
         self.notice = None;
-        self.payment_form = Some(payment::Form::default());
+        self.payment_form = Some(payment::Form::new(self.customer));
     }
 
-    fn checkout(&mut self, payment: crate::store::Payment) {
+    fn checkout(&mut self, payment: crate::store::Payment, customer: Option<i64>) {
         let result = (|| {
             let id = self.store.as_mut().context("Сховище недоступне")?.sell(
                 &self.cart,
-                self.customer,
+                customer,
                 self.parked_cart,
                 payment,
             )?;
@@ -442,6 +445,9 @@ impl ViSales {
             self.customer = None;
             self.parked_cart = None;
             self.refresh()?;
+            self.receipt_id = Some(id);
+            self.desktop_sale_panel = Some(sale_details::Panel::Receipts);
+            self.portrait_search = portrait_pos::Search::Receipts;
             Ok(format!("Тестовий продаж №{id} записано локально"))
         })();
         self.result(result);
