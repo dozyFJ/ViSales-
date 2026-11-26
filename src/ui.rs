@@ -92,7 +92,9 @@ pub struct ViSales {
     page: usize,
     access: admin::Access,
     login: login::Login,
+    dock_menu_open: bool,
     cash_menu_open: bool,
+    settings_menu_open: bool,
     stock_menu_open: bool,
     dark: bool,
     search: String,
@@ -147,7 +149,9 @@ impl ViSales {
             page: 0,
             access: admin::Access::default(),
             login: login::Login::default(),
+            dock_menu_open: false,
             cash_menu_open: true,
+            settings_menu_open: false,
             stock_menu_open: false,
             dark: true,
             search: String::new(),
@@ -905,6 +909,7 @@ impl ViSales {
         self.login = login::Login::default();
         self.access = admin::Access::default();
         self.payment_form = None;
+        self.dock_menu_open = false;
         self.refund = None;
         self.navigate(0);
     }

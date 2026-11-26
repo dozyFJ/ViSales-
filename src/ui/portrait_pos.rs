@@ -98,6 +98,8 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             }
         });
 
+    dock(app, ctx, &palette, search_id);
+
     if app.page == 0 {
         egui::TopBottomPanel::bottom("portrait-pos-total")
             .exact_height(62.)
@@ -132,116 +134,6 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 });
             });
     }
-
-    egui::SidePanel::right("portrait-pos-actions")
-        .exact_width(99.)
-        .resizable(false)
-        .frame(palette.panel(4, 8))
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if rail_button(
-                    ui,
-                    &palette,
-                    group_label("Каса", app.cash_menu_open),
-                    app.page == 0,
-                ) {
-                    if app.page == 0 {
-                        app.cash_menu_open = !app.cash_menu_open;
-                    } else {
-                        app.navigate(0);
-                        app.cash_menu_open = true;
-                    }
-                }
-                if app.cash_menu_open {
-                    ui.indent("cash-actions", |ui| {
-                        for (mode, label) in [
-                            (Search::Browse, "Вибрати товар"),
-                            (Search::Cart, "Кошик"),
-                            (Search::Parked, "Відкладені"),
-                            (Search::Customers, "Клієнти"),
-                            (Search::Receipts, "Чеки"),
-                            (Search::Product, "Пошук"),
-                            (Search::Barcode, "Штрихкод"),
-                        ] {
-                            let active = app.page == 0 && app.portrait_search == mode;
-                            if rail_button(ui, &palette, label, active) {
-                                app.navigate(0);
-                                if matches!(mode, Search::Product | Search::Barcode) {
-                                    if app.portrait_search != mode {
-                                        app.search.clear();
-                                    }
-                                    ctx.memory_mut(|memory| memory.request_focus(search_id));
-                                }
-                                if mode == Search::Browse {
-                                    app.search.clear();
-                                    ctx.memory_mut(|memory| memory.surrender_focus(search_id));
-                                }
-                                app.portrait_search = mode;
-                            }
-                        }
-                        #[cfg(target_os = "android")]
-                        ui.add_enabled_ui(!app.scanning && app.store.is_some(), |ui| {
-                            if rail_button(ui, &palette, "Сканер", false) {
-                                app.navigate(0);
-                                app.start_camera(ctx);
-                            }
-                        });
-                    });
-                }
-
-                ui.separator();
-                if app.access.unlocked {
-                    if rail_button(
-                        ui,
-                        &palette,
-                        group_label("Склад", app.stock_menu_open),
-                        (1..=3).contains(&app.page),
-                    ) {
-                        app.stock_menu_open = !app.stock_menu_open;
-                    }
-                    if app.stock_menu_open {
-                        ui.indent("stock-actions", |ui| {
-                            for index in 1..=3 {
-                                let label = if index == 2 {
-                                    "Залишки"
-                                } else {
-                                    PAGES[index]
-                                };
-                                if rail_button(ui, &palette, label, app.page == index) {
-                                    app.navigate(index);
-                                }
-                            }
-                        });
-                    }
-                    for index in [4, 5, admin::PAGE] {
-                        if rail_button(ui, &palette, PAGES[index], app.page == index) {
-                            app.navigate(index);
-                        }
-                    }
-                    ui.separator();
-                }
-                #[cfg(target_os = "android")]
-                if rail_button(ui, &palette, "Оновлення", false) {
-                    app.check_updates();
-                }
-                if rail_button(ui, &palette, "Заблокувати", false) {
-                    app.lock_screen();
-                }
-                if rail_button(
-                    ui,
-                    &palette,
-                    if app.dark {
-                        "Світла тема"
-                    } else {
-                        "Темна тема"
-                    },
-                    false,
-                ) {
-                    app.dark = !app.dark;
-                    ctx.set_visuals(visuals(app.dark));
-                }
-            });
-        });
 
     egui::CentralPanel::default()
         .frame(Frame::new().fill(palette.grid).inner_margin(4))
@@ -321,13 +213,207 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             });
             product_list(app, ui, &palette, barcode);
         });
+    if app.dock_menu_open && app.login.authenticated {
+        menu_sheet(app, ctx, &palette, search_id);
+    }
+}
+
+const DOCK_HEIGHT: f32 = 60.;
+
+fn dock(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: egui::Id) {
+    egui::TopBottomPanel::bottom("portrait-dock")
+        .exact_height(DOCK_HEIGHT)
+        .frame(palette.panel(7, 5))
+        .show(ctx, |ui| {
+            let count = if app.access.unlocked { 4 } else { 3 };
+            ui.columns(count, |columns| {
+                let cart = app.page == 0 && app.portrait_search == Search::Cart;
+                if nav_button(&mut columns[0], palette, "Каса", app.page == 0 && !cart) {
+                    ctx.memory_mut(|memory| memory.surrender_focus(search_id));
+                    app.dock_menu_open = true;
+                    app.cash_menu_open = true;
+                    app.stock_menu_open = false;
+                    app.settings_menu_open = false;
+                }
+                if nav_button(&mut columns[1], palette, "Кошик", cart) {
+                    app.navigate(0);
+                    app.portrait_search = Search::Cart;
+                    ctx.memory_mut(|memory| memory.surrender_focus(search_id));
+                }
+                if app.access.unlocked
+                    && nav_button(
+                        &mut columns[2],
+                        palette,
+                        "Склад",
+                        (1..=3).contains(&app.page),
+                    )
+                {
+                    ctx.memory_mut(|memory| memory.surrender_focus(search_id));
+                    app.dock_menu_open = true;
+                    app.cash_menu_open = false;
+                    app.stock_menu_open = true;
+                    app.settings_menu_open = false;
+                }
+                if nav_button(&mut columns[count - 1], palette, "Меню", app.dock_menu_open) {
+                    ctx.memory_mut(|memory| memory.surrender_focus(search_id));
+                    app.dock_menu_open = true;
+                    app.cash_menu_open = false;
+                    app.stock_menu_open = false;
+                    app.settings_menu_open = true;
+                }
+            });
+        });
+}
+
+fn menu_sheet(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: egui::Id) {
+    let id = egui::Id::new("portrait-actions-sheet");
+    let area = egui::Modal::default_area(id)
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0., -DOCK_HEIGHT));
+    let mut close = false;
+    let response = egui::Modal::new(id)
+        .area(area)
+        .frame(palette.panel(12, 8))
+        .show(ctx, |ui| {
+            let width = (ctx.screen_rect().width() - 26.).clamp(160., 560.);
+            ui.set_width(width);
+            ui.horizontal(|ui| {
+                ui.heading("Меню");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    close |= ui.button("Закрити").clicked();
+                });
+            });
+            ui.separator();
+            let height = (ctx.screen_rect().height() - DOCK_HEIGHT - 76.).clamp(64., 420.);
+            egui::ScrollArea::vertical()
+                .max_height(height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    if nav_button(
+                        ui,
+                        palette,
+                        group_label("Каса", app.cash_menu_open),
+                        app.cash_menu_open,
+                    ) {
+                        app.cash_menu_open = !app.cash_menu_open;
+                    }
+                    if app.cash_menu_open {
+                        ui.indent("cash-actions", |ui| {
+                            for (mode, label) in [
+                                (Search::Browse, "Вибрати товар"),
+                                (Search::Cart, "Кошик"),
+                                (Search::Parked, "Відкладені"),
+                                (Search::Customers, "Клієнти"),
+                                (Search::Receipts, "Чеки"),
+                                (Search::Product, "Пошук"),
+                                (Search::Barcode, "Штрихкод"),
+                            ] {
+                                if nav_button(
+                                    ui,
+                                    palette,
+                                    label,
+                                    app.page == 0 && app.portrait_search == mode,
+                                ) {
+                                    app.navigate(0);
+                                    if app.portrait_search != mode {
+                                        app.search.clear();
+                                    }
+                                    app.portrait_search = mode;
+                                    if matches!(mode, Search::Product | Search::Barcode) {
+                                        ctx.memory_mut(|memory| memory.request_focus(search_id));
+                                    }
+                                    close = true;
+                                }
+                            }
+                            #[cfg(target_os = "android")]
+                            ui.add_enabled_ui(!app.scanning && app.store.is_some(), |ui| {
+                                if nav_button(ui, palette, "Сканер", false) {
+                                    app.navigate(0);
+                                    app.start_camera(ctx);
+                                    close = true;
+                                }
+                            });
+                        });
+                    }
+                    if app.access.unlocked {
+                        if nav_button(
+                            ui,
+                            palette,
+                            group_label("Склад", app.stock_menu_open),
+                            app.stock_menu_open,
+                        ) {
+                            app.stock_menu_open = !app.stock_menu_open;
+                        }
+                        if app.stock_menu_open {
+                            ui.indent("stock-actions", |ui| {
+                                for index in 1..=3 {
+                                    let label = if index == 2 {
+                                        "Залишки"
+                                    } else {
+                                        PAGES[index]
+                                    };
+                                    if nav_button(ui, palette, label, app.page == index) {
+                                        app.navigate(index);
+                                        close = true;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    if nav_button(
+                        ui,
+                        palette,
+                        group_label("Налаштування", app.settings_menu_open),
+                        app.settings_menu_open,
+                    ) {
+                        app.settings_menu_open = !app.settings_menu_open;
+                    }
+                    if app.settings_menu_open {
+                        ui.indent("settings-actions", |ui| {
+                            if app.access.unlocked {
+                                for index in [4, 5, admin::PAGE] {
+                                    if nav_button(ui, palette, PAGES[index], app.page == index) {
+                                        app.navigate(index);
+                                        close = true;
+                                    }
+                                }
+                            }
+                            #[cfg(target_os = "android")]
+                            if nav_button(ui, palette, "Оновлення", false) {
+                                app.check_updates();
+                                close = true;
+                            }
+                            if nav_button(ui, palette, "Заблокувати", false) {
+                                app.lock_screen();
+                                close = true;
+                            }
+                            if nav_button(
+                                ui,
+                                palette,
+                                if app.dark {
+                                    "Світла тема"
+                                } else {
+                                    "Темна тема"
+                                },
+                                false,
+                            ) {
+                                app.dark = !app.dark;
+                                ctx.set_visuals(visuals(app.dark));
+                                close = true;
+                            }
+                        });
+                    }
+                });
+        });
+    if close || response.should_close() {
+        app.dock_menu_open = false;
+    }
 }
 
 fn group_label(label: &str, expanded: bool) -> String {
-    format!("{} {label}", if expanded { "▾" } else { "▸" })
+    format!("{} {label}", if expanded { "−" } else { "+" })
 }
 
-fn rail_button(
+fn nav_button(
     ui: &mut egui::Ui,
     palette: &Palette,
     label: impl Into<String>,
@@ -725,7 +811,7 @@ mod tests {
             } else {
                 "Тестовий розрахунок"
             };
-            for label in ["▾ Каса", "Назва або код", checkout] {
+            for label in ["Каса", "Назва або код", checkout] {
                 assert_eq!(
                     position(&before, label),
                     position(&after, label),
@@ -788,7 +874,10 @@ mod tests {
         assert!(text_position("3 шт.").is_some());
         let product = text_position("Кава").expect("catalogue row appears in portrait");
         let checkout = text_position("Тестовий розрахунок").expect("checkout stays visible");
-        assert!(checkout.y > 680. && product.y < checkout.y);
+        assert!(checkout.y > 620. && product.y < checkout.y);
+        let dock_cash = text_position("Каса").expect("dock cash button appears");
+        assert!(dock_cash.y > checkout.y);
+
         let _ = frame(vec![egui::Event::PointerMoved(product)]);
         for pressed in [true, false] {
             let _ = frame(vec![
@@ -801,6 +890,24 @@ mod tests {
                 },
             ]);
         }
+        for pressed in [true, false] {
+            let _ = frame(vec![
+                egui::Event::PointerMoved(dock_cash),
+                egui::Event::PointerButton {
+                    pos: dock_cash,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+        }
+        let _ = frame(Vec::new());
+        let sheet = frame(Vec::new());
+        assert!(sheet.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Відкладені")
+        }));
+        assert!(app.dock_menu_open);
+        app.dock_menu_open = false;
         assert_eq!(app.cart_total(), 6900);
         app.search = "кав".into();
         add_quick_product(&mut app);
