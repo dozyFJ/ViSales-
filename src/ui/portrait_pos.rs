@@ -4,6 +4,7 @@ use egui_extras::{Column, TableBuilder};
 
 #[derive(PartialEq, Eq)]
 pub(super) enum Search {
+    Browse,
     Product,
     Barcode,
     Cart,
@@ -141,18 +142,23 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 if app.cash_menu_open {
                     ui.indent("cash-actions", |ui| {
                         for (mode, label) in [
-                            (Search::Cart, "Продаж"),
+                            (Search::Browse, "Вибрати товар"),
+                            (Search::Cart, "Кошик"),
                             (Search::Product, "Пошук"),
                             (Search::Barcode, "Штрихкод"),
                         ] {
                             let active = app.page == 0 && app.portrait_search == mode;
                             if rail_button(ui, &palette, label, active) {
                                 app.navigate(0);
-                                if mode != Search::Cart {
+                                if matches!(mode, Search::Product | Search::Barcode) {
                                     if app.portrait_search != mode {
                                         app.search.clear();
                                     }
                                     ctx.memory_mut(|memory| memory.request_focus(search_id));
+                                }
+                                if mode == Search::Browse {
+                                    app.search.clear();
+                                    ctx.memory_mut(|memory| memory.surrender_focus(search_id));
                                 }
                                 app.portrait_search = mode;
                             }
@@ -245,6 +251,11 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 sale_table(app, ui);
                 return;
             }
+            if app.portrait_search == Search::Browse {
+                ui.heading("Вибрати товар");
+                grid(app, ui, &palette, false);
+                return;
+            }
             let barcode = app.portrait_search == Search::Barcode;
             let input = ui.add(
                 TextEdit::singleline(&mut app.search)
@@ -274,13 +285,15 @@ fn rail_button(
     label: impl Into<String>,
     active: bool,
 ) -> bool {
-    let ink = if active {
-        Color32::from_rgb(28, 42, 51)
-    } else {
-        palette.ink
-    };
-    let button = Button::new(RichText::new(label.into()).size(12.).strong().color(ink))
-        .fill(if active { palette.action } else { palette.grid });
+    let label = label.into();
+    let transition = ui
+        .ctx()
+        .animate_bool_with_time(ui.make_persistent_id(&label), active, 0.12);
+    let ink = palette
+        .ink
+        .lerp_to_gamma(Color32::from_rgb(28, 42, 51), transition);
+    let button = Button::new(RichText::new(label).size(12.).strong().color(ink))
+        .fill(palette.grid.lerp_to_gamma(palette.action, transition));
     ui.add_sized([ui.available_width(), 42.], button).clicked()
 }
 
@@ -294,14 +307,23 @@ fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
     let now = ui.input(|input| input.time);
     let highlighted = app.scanned_row.filter(|(_, time)| now - time < 1.8);
     if let Some((_, start)) = highlighted {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_secs_f64(
-                (1.8 - (now - start)).clamp(0., 1.8),
-            ));
+        if now - start >= 1.3 {
+            ui.ctx().request_repaint();
+        } else {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(1.3 - (now - start)));
+        }
     } else {
         app.scanned_row = None;
     }
     let width = (ui.available_width() - 12.).max(150.);
+    let highlight_fill = highlighted.map(|(_, start)| {
+        let opacity = ((1.8 - (now - start)) / 0.5).clamp(0., 1.) as f32;
+        ui.visuals().selection.bg_fill.linear_multiply(opacity)
+    });
+    if let Some(fill) = highlight_fill {
+        ui.visuals_mut().selection.bg_fill = fill;
+    }
     let mut table = TableBuilder::new(ui)
         .striped(true)
         .auto_shrink([false, false])
@@ -360,7 +382,11 @@ fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
 
 fn grid(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode: bool) {
     const ROW_HEIGHT: f32 = 38.;
-    let query = app.search.trim().to_lowercase();
+    let query = if app.portrait_search == Search::Browse {
+        String::new()
+    } else {
+        app.search.trim().to_lowercase()
+    };
     let products: Vec<_> = app
         .products
         .iter()

@@ -1,6 +1,7 @@
 #[cfg(target_os = "android")]
 mod android_scanner;
 mod exchange;
+mod fiscal;
 mod store;
 mod ui;
 

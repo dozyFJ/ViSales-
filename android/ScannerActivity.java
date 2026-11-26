@@ -187,7 +187,7 @@ public final class ScannerActivity extends NativeActivity {
                         Dialog current = scanner;
                         guide.postDelayed(() -> {
                             if (scanner == current) current.dismiss();
-                        }, 300);
+                        }, 180);
                     } catch (NotFoundException unreadable) {
                         reader.reset();
                     }

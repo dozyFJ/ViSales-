@@ -1,6 +1,6 @@
 [package]
 name = "visales"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 default-run = "visales"
 
@@ -12,6 +12,10 @@ eframe = { version = "0.31.1", default-features = false, features = ["default_fo
 egui_extras = "0.31.1"
 rusqlite = { version = "0.34", features = ["bundled"] }
 anyhow = "1"
+prost = "0.14"
+tokio = { version = "1", features = ["rt"] }
+tonic = { version = "0.14", default-features = false, features = ["transport", "tls-webpki-roots"] }
+tonic-prost = "0.14"
 argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
 calamine = "0.38"

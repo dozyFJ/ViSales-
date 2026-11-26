@@ -66,6 +66,7 @@ pub fn visuals(dark: bool) -> egui::Visuals {
 
 pub struct ViSales {
     directory: PathBuf,
+    splash_started: std::time::Instant,
     store: Option<Store>,
     products: Vec<Product>,
     sales: Vec<Sale>,
@@ -95,6 +96,8 @@ pub struct ViSales {
     reference: String,
     amount: String,
     delivery_cost: String,
+    fiscal_request_path: String,
+    fiscal_status: Option<std::sync::mpsc::Receiver<Result<String>>>,
     import_path: String,
     refund: Option<i64>,
     notice: Option<(bool, String)>,
@@ -106,8 +109,11 @@ impl ViSales {
             .map_err(anyhow::Error::from)
             .and_then(|()| Store::open(&directory.join("visales.sqlite3")));
         let mut app = Self {
+            fiscal_request_path: String::new(),
+            fiscal_status: None,
             import_path: directory.join("ViSales.xlsx").display().to_string(),
             directory,
+            splash_started: std::time::Instant::now(),
             store: None,
             products: Vec::new(),
             sales: Vec::new(),
@@ -119,7 +125,7 @@ impl ViSales {
             android_app: None,
             #[cfg(target_os = "android")]
             scanning: false,
-            portrait_search: portrait_pos::Search::Product,
+            portrait_search: portrait_pos::Search::Browse,
             page: 0,
             access: admin::Access::default(),
             cash_menu_open: true,
@@ -220,7 +226,7 @@ impl ViSales {
         };
         let result = match crate::android_scanner::take(app) {
             Ok(None) => {
-                ctx.request_repaint_after(std::time::Duration::from_millis(160));
+                ctx.request_repaint_after(std::time::Duration::from_millis(80));
                 return;
             }
             Ok(Some(result)) => result,
@@ -744,11 +750,36 @@ impl ViSales {
                 }
             });
         });
+        card(ui, |ui| {
+            ui.heading("ПРРО · Тестовий сервер ДПС");
+            ui.label("Перевірка стану зміни за підписаним номером ПРРО.");
+            ui.add(
+                TextEdit::singleline(&mut self.fiscal_request_path)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("Шлях до CMS SignedData"),
+            );
+            ui.weak("Виберіть підписаний запит. Файл ключа та пароль залишаються на пристрої.");
+            let enabled =
+                self.fiscal_status.is_none() && !self.fiscal_request_path.trim().is_empty();
+            if ui
+                .add_enabled(enabled, egui::Button::new("Запитати статус"))
+                .clicked()
+            {
+                let path = PathBuf::from(self.fiscal_request_path.trim());
+                let (send, receive) = std::sync::mpsc::channel();
+                let ctx = ui.ctx().clone();
+                self.notice = None;
+                self.fiscal_status = Some(receive);
+                std::thread::spawn(move || {
+                    let _ = send.send(crate::fiscal::test_status(&path));
+                    ctx.request_repaint();
+                });
+            }
+            if self.fiscal_status.is_some() {
+                ui.spinner();
+            }
+        });
         for (title, detail) in [
-            (
-                "ПРРО · ДПС України",
-                "Тестовий режим · Фіскальні документи не надсилаються.",
-            ),
             (
                 "ПриватБанк · Термінал",
                 "Тестовий режим · NFC-оплата недоступна до підключення API.",
@@ -827,6 +858,24 @@ impl eframe::App for ViSales {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         #[cfg(target_os = "android")]
         self.poll_camera(ctx);
+        if let Some(receiver) = &self.fiscal_status {
+            let result = match receiver.try_recv() {
+                Ok(result) => Some(result),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    Some(Err(anyhow::anyhow!("Запит до ДПС перервався")))
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            };
+            if let Some(result) = result {
+                self.fiscal_status = None;
+                if self.access.unlocked && self.page == 5 {
+                    self.result(result);
+                }
+            }
+        }
+        if mobile::startup_splash(ctx, self.splash_started.elapsed().as_secs_f32()) {
+            return;
+        }
         let screen = ctx.screen_rect();
         let portrait = screen.width() < screen.height();
         if portrait {

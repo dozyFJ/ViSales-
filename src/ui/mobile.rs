@@ -137,3 +137,38 @@ pub(super) fn pills(ui: &mut egui::Ui, selected: &mut usize, labels: &[&str], da
         }
     });
 }
+
+pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
+    const DURATION: f32 = 0.46;
+    if elapsed >= DURATION || !cfg!(target_os = "android") {
+        return false;
+    }
+
+    egui::CentralPanel::default()
+        .frame(Frame::new().fill(Color32::from_rgb(28, 34, 41)))
+        .show(ctx, |ui| {
+            let center = ui.max_rect().center();
+            let painter = ui.painter();
+            painter.text(
+                center + egui::vec2(0., -24.),
+                egui::Align2::CENTER_CENTER,
+                "ViSales",
+                egui::FontId::proportional(35.),
+                Color32::from_rgb(229, 238, 244),
+            );
+            for dot in 0..8 {
+                let offset = dot as f32 / 8.;
+                let phase = (elapsed * 2.4 + offset).fract();
+                let angle = (offset + elapsed * 0.9) * std::f32::consts::TAU;
+                let point =
+                    center + egui::vec2(angle.cos(), angle.sin()) * 13. + egui::vec2(0., 29.);
+                painter.circle_filled(
+                    point,
+                    1.5 + phase,
+                    Color32::from_rgb(98, 188, 219).linear_multiply(0.3 + 0.7 * phase),
+                );
+            }
+        });
+    ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    true
+}
