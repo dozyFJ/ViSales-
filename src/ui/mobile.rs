@@ -125,7 +125,7 @@ pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
     }
 
     egui::CentralPanel::default()
-        .frame(Frame::new().fill(theme::BLACK))
+        .frame(Frame::new().fill(theme::Palette::new(false).grid))
         .show(ctx, |ui| {
             let center = ui.max_rect().center();
             let painter = ui.painter();
@@ -134,7 +134,7 @@ pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
                 egui::Align2::CENTER_CENTER,
                 "ViSales",
                 egui::FontId::proportional(35.),
-                Color32::from_rgb(229, 238, 244),
+                theme::BLACK,
             );
             for dot in 0..8 {
                 let offset = dot as f32 / 8.;
@@ -145,7 +145,7 @@ pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
                 painter.circle_filled(
                     point,
                     1.5 + phase,
-                    theme::SIGNAL.linear_multiply(0.3 + 0.7 * phase),
+                    theme::BLACK.linear_multiply(0.3 + 0.7 * phase),
                 );
             }
         });

@@ -3,6 +3,9 @@ use eframe::egui::{self, Color32, Frame, Margin, Stroke};
 pub(super) const SIGNAL: Color32 = Color32::from_rgb(255, 215, 54);
 pub(super) const BLACK: Color32 = Color32::from_rgb(19, 20, 20);
 pub(super) const LILAC: Color32 = Color32::from_rgb(207, 183, 246);
+pub(super) const MINT: Color32 = Color32::from_rgb(176, 235, 199);
+pub(super) const PEACH: Color32 = Color32::from_rgb(255, 193, 166);
+pub(super) const SKY: Color32 = Color32::from_rgb(174, 218, 255);
 
 pub(super) struct Palette {
     pub grid: Color32,

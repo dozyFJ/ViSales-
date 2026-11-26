@@ -179,7 +179,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             product_list(app, ui, &palette, barcode);
         });
     if app.dock_menu_open && app.login.authenticated {
-        menu_sheet(app, ctx, &palette, search_id);
+        menu_drawer(app, ctx, &palette, search_id);
     }
 }
 
@@ -193,23 +193,30 @@ fn dock(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: eg
             let count = if app.access.unlocked { 4 } else { 3 };
             ui.columns(count, |columns| {
                 let cart = app.page == 0 && app.portrait_search == Search::Cart;
-                if nav_button(&mut columns[0], palette, "Каса", app.page == 0 && !cart) {
+                if dock_button(
+                    &mut columns[0],
+                    palette,
+                    "Каса",
+                    theme::LILAC,
+                    app.page == 0 && !cart,
+                ) {
                     ctx.memory_mut(|memory| memory.surrender_focus(search_id));
                     app.dock_menu_open = true;
                     app.cash_menu_open = true;
                     app.stock_menu_open = false;
                     app.settings_menu_open = false;
                 }
-                if nav_button(&mut columns[1], palette, "Кошик", cart) {
+                if dock_button(&mut columns[1], palette, "Кошик", theme::MINT, cart) {
                     app.navigate(0);
                     app.portrait_search = Search::Cart;
                     ctx.memory_mut(|memory| memory.surrender_focus(search_id));
                 }
                 if app.access.unlocked
-                    && nav_button(
+                    && dock_button(
                         &mut columns[2],
                         palette,
                         "Склад",
+                        theme::SKY,
                         (1..=3).contains(&app.page),
                     )
                 {
@@ -219,7 +226,13 @@ fn dock(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: eg
                     app.stock_menu_open = true;
                     app.settings_menu_open = false;
                 }
-                if nav_button(&mut columns[count - 1], palette, "Меню", app.dock_menu_open) {
+                if dock_button(
+                    &mut columns[count - 1],
+                    palette,
+                    "Меню",
+                    theme::PEACH,
+                    app.dock_menu_open,
+                ) {
                     ctx.memory_mut(|memory| memory.surrender_focus(search_id));
                     app.dock_menu_open = true;
                     app.cash_menu_open = false;
@@ -230,16 +243,33 @@ fn dock(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: eg
         });
 }
 
-fn menu_sheet(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: egui::Id) {
-    let id = egui::Id::new("portrait-actions-sheet");
-    let area = egui::Modal::default_area(id)
-        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0., -DOCK_HEIGHT));
+fn dock_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    label: &str,
+    accent: Color32,
+    active: bool,
+) -> bool {
+    let fill = if active { palette.action } else { accent };
+    let button = Button::new(RichText::new(label).strong().color(theme::BLACK))
+        .fill(fill)
+        .stroke(Stroke::new(
+            if active { 3.0_f32 } else { 2.0_f32 },
+            theme::BLACK,
+        ))
+        .truncate();
+    ui.add_sized([ui.available_width(), 42.], button).clicked()
+}
+
+fn menu_drawer(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_id: egui::Id) {
+    let id = egui::Id::new("portrait-actions-drawer");
+    let area = egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, egui::vec2(0., 75.));
     let mut close = false;
     let response = egui::Modal::new(id)
         .area(area)
         .frame(palette.panel(12, 8))
         .show(ctx, |ui| {
-            let width = (ctx.screen_rect().width() - 26.).clamp(160., 560.);
+            let width = (ctx.screen_rect().width() * 0.69 - 26.).clamp(145., 325.);
             ui.set_width(width);
             ui.horizontal(|ui| {
                 ui.heading("Меню");
@@ -248,10 +278,11 @@ fn menu_sheet(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search_
                 });
             });
             ui.separator();
-            let height = (ctx.screen_rect().height() - DOCK_HEIGHT - 76.).clamp(64., 420.);
+            let height = (ctx.screen_rect().height() - DOCK_HEIGHT - 130.).max(52.);
             egui::ScrollArea::vertical()
                 .max_height(height)
-                .auto_shrink([false, true])
+                .min_scrolled_height(height)
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
                     if nav_button(
                         ui,
@@ -670,10 +701,23 @@ fn product_card(ui: &mut egui::Ui, palette: &Palette, product: &Product, size: e
             egui::Sense::hover()
         },
     );
-    let fill = if clickable && response.hovered() {
-        palette.rail.lerp_to_gamma(palette.action, 0.14)
+    let light = !ui.visuals().dark_mode;
+    let surface = if light && clickable {
+        let colors = [theme::LILAC, theme::MINT, theme::PEACH, theme::SKY];
+        let category = product.category.as_deref().unwrap_or_default();
+        let index = category
+            .bytes()
+            .fold(0_usize, |sum, byte| sum.wrapping_add(byte as usize));
+        palette
+            .rail
+            .lerp_to_gamma(colors[index % colors.len()], 0.38)
     } else {
         palette.rail
+    };
+    let fill = if clickable && response.hovered() {
+        surface.lerp_to_gamma(palette.action, 0.18)
+    } else {
+        surface
     };
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0., fill);

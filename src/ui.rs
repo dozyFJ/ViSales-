@@ -25,6 +25,7 @@ const PAGES: [&str; 7] = [
     "Адмінка",
 ];
 const ACCENT: Color32 = theme::SIGNAL;
+pub const DEFAULT_DARK: bool = false;
 
 pub fn visuals(dark: bool) -> egui::Visuals {
     theme::visuals(dark)
@@ -118,7 +119,7 @@ impl ViSales {
             cash_menu_open: true,
             settings_menu_open: false,
             stock_menu_open: false,
-            dark: true,
+            dark: DEFAULT_DARK,
             search: String::new(),
             catalog_search: String::new(),
             barcode: String::new(),
