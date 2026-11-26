@@ -1,4 +1,9 @@
 use anyhow::{Context, Result, ensure};
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+};
+use rand_core::OsRng;
 use rusqlite::{Connection, TransactionBehavior::Immediate, params};
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
@@ -51,12 +56,83 @@ pub fn parse_money(value: &str) -> Result<i64> {
     Ok(total)
 }
 
+fn valid_pin(pin: &str) -> bool {
+    (6..=12).contains(&pin.len()) && pin.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn hash_pin(pin: &str) -> Result<String> {
+    ensure!(valid_pin(pin), "PIN має містити від 6 до 12 цифр");
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(pin.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|error| anyhow::anyhow!("Не вдалося зберегти PIN: {error}"))
+}
+
+fn matches_pin(pin: &str, stored: &str) -> Result<bool> {
+    let hash =
+        PasswordHash::new(stored).map_err(|error| anyhow::anyhow!("Пошкоджений PIN: {error}"))?;
+    Ok(Argon2::default()
+        .verify_password(pin.as_bytes(), &hash)
+        .is_ok())
+}
+
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch(include_str!("schema.sql"))?;
         Ok(Self(conn))
+    }
+
+    pub fn has_admin_pin(&self) -> Result<bool> {
+        Ok(self
+            .0
+            .query_row("SELECT EXISTS(SELECT 1 FROM admin_access)", [], |row| {
+                row.get(0)
+            })?)
+    }
+
+    pub fn set_initial_admin_pin(&self, pin: &str) -> Result<()> {
+        let hash = hash_pin(pin)?;
+        ensure!(
+            self.0.execute(
+                "INSERT INTO admin_access(id,pin_hash) VALUES(1,?1) ON CONFLICT(id) DO NOTHING",
+                [&hash],
+            )? == 1,
+            "PIN адміністратора вже встановлено"
+        );
+        Ok(())
+    }
+
+    pub fn verify_admin_pin(&self, pin: &str) -> Result<bool> {
+        if !valid_pin(pin) {
+            return Ok(false);
+        }
+        let stored: String =
+            self.0
+                .query_row("SELECT pin_hash FROM admin_access WHERE id=1", [], |row| {
+                    row.get(0)
+                })?;
+        Ok(matches_pin(pin, &stored)?)
+    }
+
+    pub fn change_admin_pin(&mut self, current: &str, new: &str) -> Result<()> {
+        let tx = self.0.transaction_with_behavior(Immediate)?;
+        let stored: String =
+            tx.query_row("SELECT pin_hash FROM admin_access WHERE id=1", [], |row| {
+                row.get(0)
+            })?;
+        ensure!(
+            valid_pin(current) && matches_pin(current, &stored)?,
+            "Неправильний поточний PIN"
+        );
+        tx.execute(
+            "UPDATE admin_access SET pin_hash=?1 WHERE id=1",
+            [hash_pin(new)?],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn products(&self) -> Result<Vec<Product>> {
@@ -289,6 +365,22 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admin_pin_is_initialized_once_and_can_be_changed() -> Result<()> {
+        let mut store = Store::open(Path::new(":memory:"))?;
+        assert!(!store.has_admin_pin()?);
+        assert!(store.set_initial_admin_pin("123").is_err());
+        store.set_initial_admin_pin("123456")?;
+        assert!(store.has_admin_pin()?);
+        assert!(store.set_initial_admin_pin("654321").is_err());
+        assert!(!store.verify_admin_pin("654321")?);
+        assert!(store.change_admin_pin("654321", "999999").is_err());
+        store.change_admin_pin("123456", "654321")?;
+        assert!(!store.verify_admin_pin("123456")?);
+        assert!(store.verify_admin_pin("654321")?);
+        Ok(())
+    }
 
     #[test]
     fn demo_catalog_can_be_added_again_without_resetting_stock() -> Result<()> {

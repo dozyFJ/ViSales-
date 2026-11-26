@@ -1,3 +1,4 @@
+mod admin;
 mod mobile;
 mod portrait_pos;
 
@@ -10,13 +11,14 @@ use eframe::egui::{self, Color32, Frame, RichText, TextEdit, Ui};
 use egui_extras::{Column, TableBuilder};
 use std::{collections::BTreeMap, path::PathBuf};
 
-const PAGES: [&str; 6] = [
+const PAGES: [&str; 7] = [
     "Каса",
     "Каталог",
     "Склад",
     "Поставки",
     "Звіти",
     "Інтеграції",
+    "Адмінка",
 ];
 const ACCENT: Color32 = Color32::from_rgb(95, 154, 245);
 
@@ -77,6 +79,9 @@ pub struct ViSales {
     scanning: bool,
     portrait_search: portrait_pos::Search,
     page: usize,
+    access: admin::Access,
+    cash_menu_open: bool,
+    stock_menu_open: bool,
     dark: bool,
     search: String,
     catalog_search: String,
@@ -116,6 +121,9 @@ impl ViSales {
             scanning: false,
             portrait_search: portrait_pos::Search::Product,
             page: 0,
+            access: admin::Access::default(),
+            cash_menu_open: true,
+            stock_menu_open: false,
             dark: true,
             search: String::new(),
             catalog_search: String::new(),
@@ -186,24 +194,19 @@ impl ViSales {
     }
 
     #[cfg(target_os = "android")]
-    fn camera_button(&mut self, ui: &mut Ui) {
-        if ui
-            .add_enabled(
-                self.store.is_some() && !self.scanning,
-                egui::Button::new("Камера").min_size(egui::vec2(0., 44.)),
-            )
-            .clicked()
+    fn start_camera(&mut self, ctx: &egui::Context) {
+        if self.scanning || self.store.is_none() {
+            return;
+        }
+        if self
+            .android_app
+            .as_ref()
+            .is_some_and(|app| crate::android_scanner::start(app).is_ok())
         {
-            if self
-                .android_app
-                .as_ref()
-                .is_some_and(|app| crate::android_scanner::start(app).is_ok())
-            {
-                self.scanning = true;
-                ui.ctx().request_repaint();
-            } else {
-                self.notice = Some((false, "Не вдалося запустити сканер".into()));
-            }
+            self.scanning = true;
+            ctx.request_repaint();
+        } else {
+            self.notice = Some((false, "Не вдалося запустити сканер".into()));
         }
     }
 
@@ -233,7 +236,12 @@ impl ViSales {
 
     fn pos(&mut self, ui: &mut Ui) {
         #[cfg(target_os = "android")]
-        self.camera_button(ui);
+        if ui
+            .add_enabled(!self.scanning, egui::Button::new("Сканер"))
+            .clicked()
+        {
+            self.start_camera(ui.ctx());
+        }
         let search = ui.add(
             TextEdit::singleline(&mut self.search)
                 .desired_width(f32::INFINITY)
@@ -694,17 +702,22 @@ impl ViSales {
         }
     }
 
-    fn integrations(&mut self, ui: &mut Ui) {
-        #[cfg(target_os = "android")]
-        if ui.button("Перевірити оновлення ViSales").clicked()
-            && !self
-                .android_app
-                .as_ref()
-                .is_some_and(|app| crate::android_scanner::check_updates(app).is_ok())
+    #[cfg(target_os = "android")]
+    fn check_updates(&mut self) {
+        if !self
+            .android_app
+            .as_ref()
+            .is_some_and(|app| crate::android_scanner::check_updates(app).is_ok())
         {
             self.notice = Some((false, "Не вдалося запустити перевірку оновлень".into()));
         }
+    }
 
+    fn integrations(&mut self, ui: &mut Ui) {
+        #[cfg(target_os = "android")]
+        if ui.button("Перевірити оновлення ViSales").clicked() {
+            self.check_updates();
+        }
         card(ui, |ui| {
             ui.heading("Обмін Excel");
             ui.label("Перший аркуш — каталог. Імпорт оновлює картки за штрихкодом. Залишки змінюються через склад.");
@@ -753,11 +766,48 @@ impl ViSales {
         }
     }
 
+    fn visible_pages(&self) -> impl Iterator<Item = usize> + use<> {
+        let admin = self.access.unlocked;
+        (0..PAGES.len()).filter(move |&page| page == 0 || page == admin::PAGE || admin)
+    }
+
+    fn navigate(&mut self, page: usize) {
+        self.access.clear_fields();
+        self.page = if page != 0 && !self.access.unlocked {
+            admin::PAGE
+        } else {
+            page
+        };
+        self.notice = None;
+    }
+
+    fn render_page(&mut self, ui: &mut Ui) {
+        // Enforce role access at rendering as well as navigation.
+        if self.page != 0 && !self.access.unlocked {
+            admin::show(self, ui);
+            return;
+        }
+        match self.page {
+            0 => self.pos(ui),
+            1 => self.catalog(ui),
+            2 => self.stock(ui),
+            3 => self.supplies(ui),
+            4 => self.reports(ui),
+            5 => self.integrations(ui),
+            _ => admin::show(self, ui),
+        }
+    }
+
     fn desktop_nav(&mut self, ui: &mut Ui) {
         ui.label(RichText::new("ViSales").size(28.).strong());
         ui.add_space(10.);
-        for (index, label) in PAGES.iter().enumerate() {
-            ui.selectable_value(&mut self.page, index, *label);
+        for index in self.visible_pages() {
+            if ui
+                .selectable_label(self.page == index, PAGES[index])
+                .clicked()
+            {
+                self.navigate(index);
+            }
         }
         if ui
             .small_button(if self.dark {
@@ -779,7 +829,7 @@ impl eframe::App for ViSales {
         self.poll_camera(ctx);
         let screen = ctx.screen_rect();
         let portrait = screen.width() < screen.height();
-        if portrait && self.page == 0 {
+        if portrait {
             portrait_pos::show(self, ctx);
             return;
         }
@@ -820,14 +870,7 @@ impl eframe::App for ViSales {
                     if self.store.is_none() {
                         return;
                     }
-                    match self.page {
-                        0 => self.pos(ui),
-                        1 => self.catalog(ui),
-                        2 => self.stock(ui),
-                        3 => self.supplies(ui),
-                        4 => self.reports(ui),
-                        _ => self.integrations(ui),
-                    }
+                    self.render_page(ui);
                 });
         });
     }

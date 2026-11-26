@@ -4,7 +4,6 @@ use super::{PAGES, ViSales, visuals};
 use eframe::egui::{self, Button, Color32, Frame, Margin, RichText, Stroke};
 
 const TOUCH: f32 = 46.;
-const BOTTOM_TABS: [&str; 6] = ["Каса", "Товари", "Склад", "Поставки", "Звіти", "Обмін"];
 
 pub(super) fn shell(app: &mut ViSales, ctx: &egui::Context, bottom_tabs: bool) {
     egui::TopBottomPanel::top("mobile-header")
@@ -55,10 +54,11 @@ pub(super) fn shell(app: &mut ViSales, ctx: &egui::Context, bottom_tabs: bool) {
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.x = 3.;
                 let columns = if ui.available_width() >= 345. { 6 } else { 3 };
-                for (row, labels) in BOTTOM_TABS.chunks(columns).enumerate() {
+                let indices: Vec<_> = app.visible_pages().collect();
+                for pages in indices.chunks(columns) {
                     ui.columns(columns, |uis| {
-                        for (column, label) in labels.iter().enumerate() {
-                            tab(app, &mut uis[column], row * columns + column, label, TOUCH);
+                        for (column, &page) in pages.iter().enumerate() {
+                            tab(app, &mut uis[column], page, PAGES[page], TOUCH);
                         }
                     });
                 }
@@ -70,8 +70,8 @@ pub(super) fn shell(app: &mut ViSales, ctx: &egui::Context, bottom_tabs: bool) {
             .frame(panel(ctx, 6, 8))
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index, label) in PAGES.iter().enumerate() {
-                        tab(app, ui, index, label, TOUCH + 8.);
+                    for index in app.visible_pages() {
+                        tab(app, ui, index, PAGES[index], TOUCH + 8.);
                     }
                 });
             });
@@ -116,7 +116,7 @@ fn tab(app: &mut ViSales, ui: &mut egui::Ui, index: usize, label: &str, height: 
         .add_sized([ui.available_width(), height], button)
         .clicked()
     {
-        app.page = index;
+        app.navigate(index);
     }
 }
 

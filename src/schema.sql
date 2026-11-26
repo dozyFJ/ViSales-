@@ -49,3 +49,8 @@ CREATE TABLE IF NOT EXISTS sale_line (
   unit_cost INTEGER NOT NULL,
   PRIMARY KEY(sale, product)
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS admin_access (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  pin_hash TEXT NOT NULL
+) STRICT;

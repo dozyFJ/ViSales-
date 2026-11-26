@@ -1,4 +1,4 @@
-use super::{PAGES, ViSales, matches, money, visuals};
+use super::{PAGES, ViSales, admin, matches, money, visuals};
 use eframe::egui::{self, Button, Color32, Frame, Label, Margin, RichText, Stroke, TextEdit};
 use egui_extras::{Column, TableBuilder};
 
@@ -66,9 +66,20 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
         .frame(palette.panel(9, 6))
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.strong("ViSales · Каса");
-                ui.label(RichText::new("ТЕСТОВИЙ РЕЖИМ").size(11.).strong());
+                ui.strong(format!("ViSales · {}", PAGES[app.page]));
+                ui.label(
+                    RichText::new(if app.access.unlocked {
+                        "Адміністратор"
+                    } else {
+                        "Касир"
+                    })
+                    .size(11.)
+                    .strong(),
+                );
             });
+            if app.page == 0 {
+                ui.label(RichText::new("ТЕСТОВИЙ РЕЖИМ").size(10.).strong());
+            }
             if let Some((ok, status)) = &app.notice {
                 let color = if *ok {
                     palette.ink
@@ -79,87 +90,138 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             }
         });
 
-    egui::TopBottomPanel::bottom("portrait-pos-total")
-        .frame(palette.panel(9, 7))
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("До сплати").size(11.));
-                    ui.label(RichText::new(money(app.cart_total())).size(18.).strong());
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let checkout = Button::new(
-                        RichText::new("Тестовий розрахунок")
-                            .size(12.)
-                            .strong()
-                            .color(Color32::from_rgb(28, 42, 51)),
-                    )
-                    .fill(palette.action)
-                    .min_size(egui::vec2(0., 42.));
-                    if ui
-                        .add_enabled(!app.cart.is_empty() && app.store.is_some(), checkout)
-                        .clicked()
-                    {
-                        app.checkout();
-                    }
+    if app.page == 0 {
+        egui::TopBottomPanel::bottom("portrait-pos-total")
+            .frame(palette.panel(9, 7))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("До сплати").size(11.));
+                        ui.label(RichText::new(money(app.cart_total())).size(18.).strong());
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let checkout = Button::new(
+                            RichText::new("Тестовий розрахунок")
+                                .size(12.)
+                                .strong()
+                                .color(Color32::from_rgb(28, 42, 51)),
+                        )
+                        .fill(palette.action)
+                        .min_size(egui::vec2(0., 42.));
+                        if ui
+                            .add_enabled(!app.cart.is_empty() && app.store.is_some(), checkout)
+                            .clicked()
+                        {
+                            app.checkout();
+                        }
+                    });
                 });
             });
-        });
+    }
 
     egui::SidePanel::right("portrait-pos-actions")
-        .exact_width(81.)
+        .exact_width(99.)
         .resizable(false)
         .frame(palette.panel(4, 8))
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.menu_button("Розділи", |ui| {
-                    for (index, label) in PAGES.iter().enumerate() {
-                        if ui.selectable_label(app.page == index, *label).clicked() {
-                            app.page = index;
-                            ui.close_menu();
-                        }
-                    }
-                    ui.separator();
-                    if ui
-                        .button(if app.dark {
-                            "Світла тема"
-                        } else {
-                            "Темна тема"
-                        })
-                        .clicked()
-                    {
-                        app.dark = !app.dark;
-                        ctx.set_visuals(visuals(app.dark));
-                        ui.close_menu();
-                    }
-                });
-                for (mode, label) in [
-                    (Search::Product, "Пошук"),
-                    (Search::Barcode, "Штрихкод"),
-                    (Search::Cart, "Кошик"),
-                ] {
-                    let active = app.portrait_search == mode;
-                    let ink = if active {
-                        Color32::from_rgb(28, 42, 51)
+                if rail_button(
+                    ui,
+                    &palette,
+                    group_label("Каса", app.cash_menu_open),
+                    app.page == 0,
+                ) {
+                    if app.page == 0 {
+                        app.cash_menu_open = !app.cash_menu_open;
                     } else {
-                        palette.ink
-                    };
-                    let button = Button::new(RichText::new(label).size(12.).strong().color(ink))
-                        .fill(if active { palette.action } else { palette.grid });
-                    if ui.add_sized([ui.available_width(), 44.], button).clicked() {
-                        if mode != Search::Cart {
-                            if app.portrait_search != mode {
-                                app.search.clear();
-                            }
-                            ctx.memory_mut(|memory| memory.request_focus(search_id));
-                        }
-                        app.portrait_search = mode;
+                        app.navigate(0);
+                        app.cash_menu_open = true;
                     }
                 }
+                if app.cash_menu_open {
+                    ui.indent("cash-actions", |ui| {
+                        for (mode, label) in [
+                            (Search::Cart, "Продаж"),
+                            (Search::Product, "Пошук"),
+                            (Search::Barcode, "Штрихкод"),
+                        ] {
+                            let active = app.page == 0 && app.portrait_search == mode;
+                            if rail_button(ui, &palette, label, active) {
+                                app.navigate(0);
+                                if mode != Search::Cart {
+                                    if app.portrait_search != mode {
+                                        app.search.clear();
+                                    }
+                                    ctx.memory_mut(|memory| memory.request_focus(search_id));
+                                }
+                                app.portrait_search = mode;
+                            }
+                        }
+                        #[cfg(target_os = "android")]
+                        ui.add_enabled_ui(!app.scanning && app.store.is_some(), |ui| {
+                            if rail_button(ui, &palette, "Сканер", false) {
+                                app.navigate(0);
+                                app.start_camera(ctx);
+                            }
+                        });
+                    });
+                }
+
+                ui.separator();
+                if rail_button(
+                    ui,
+                    &palette,
+                    group_label("Склад", app.stock_menu_open && app.access.unlocked),
+                    app.access.unlocked && (1..=3).contains(&app.page),
+                ) {
+                    if app.access.unlocked {
+                        app.stock_menu_open = !app.stock_menu_open;
+                    } else {
+                        app.navigate(admin::PAGE);
+                    }
+                }
+                if app.stock_menu_open && app.access.unlocked {
+                    ui.indent("stock-actions", |ui| {
+                        for index in 1..=3 {
+                            let label = if index == 2 {
+                                "Залишки"
+                            } else {
+                                PAGES[index]
+                            };
+                            if rail_button(ui, &palette, label, app.page == index) {
+                                app.navigate(index);
+                            }
+                        }
+                    });
+                }
+                if app.access.unlocked {
+                    for index in [4, 5] {
+                        if rail_button(ui, &palette, PAGES[index], app.page == index) {
+                            app.navigate(index);
+                        }
+                    }
+                }
+                if rail_button(ui, &palette, "Адмінка", app.page == admin::PAGE) {
+                    app.navigate(admin::PAGE);
+                }
+                ui.separator();
                 #[cfg(target_os = "android")]
-                app.camera_button(ui);
-                let count: i64 = app.cart.values().map(|(quantity, _)| quantity).sum();
-                ui.label(RichText::new(format!("{count} шт.")).size(11.));
+                if rail_button(ui, &palette, "Оновлення", false) {
+                    app.check_updates();
+                }
+                if rail_button(
+                    ui,
+                    &palette,
+                    if app.dark {
+                        "Світла тема"
+                    } else {
+                        "Темна тема"
+                    },
+                    false,
+                ) {
+                    app.dark = !app.dark;
+                    ctx.set_visuals(visuals(app.dark));
+                }
             });
         });
 
@@ -167,6 +229,15 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
         .frame(Frame::new().fill(palette.grid).inner_margin(4))
         .show(ctx, |ui| {
             if app.store.is_none() {
+                return;
+            }
+            if app.page != 0 {
+                egui::ScrollArea::vertical()
+                    .id_salt(app.page)
+                    .show(ui, |ui| {
+                        ui.heading(PAGES[app.page]);
+                        app.render_page(ui);
+                    });
                 return;
             }
             if app.portrait_search == Search::Cart {
@@ -191,6 +262,26 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             }
             grid(app, ui, &palette, barcode);
         });
+}
+
+fn group_label(label: &str, expanded: bool) -> String {
+    format!("{} {label}", if expanded { "▾" } else { "▸" })
+}
+
+fn rail_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    label: impl Into<String>,
+    active: bool,
+) -> bool {
+    let ink = if active {
+        Color32::from_rgb(28, 42, 51)
+    } else {
+        palette.ink
+    };
+    let button = Button::new(RichText::new(label.into()).size(12.).strong().color(ink))
+        .fill(if active { palette.action } else { palette.grid });
+    ui.add_sized([ui.available_width(), 42.], button).clicked()
 }
 
 fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
@@ -435,6 +526,13 @@ mod tests {
             ]);
         }
         assert_eq!(app.cart_total(), 6900);
+        app.navigate(2);
+        assert_eq!(app.page, admin::PAGE);
+        assert_eq!(
+            app.visible_pages().collect::<Vec<_>>(),
+            vec![0, admin::PAGE]
+        );
+        app.navigate(0);
         app.receive_scan("123", 1.0);
         assert!(app.portrait_search == Search::Cart);
         assert_eq!(app.cart_total(), 13_800);
