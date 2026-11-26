@@ -248,7 +248,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             }
             if app.portrait_search == Search::Cart {
                 ui.heading("Кошик");
-                sale_table(app, ui);
+                sale_table(app, ui, &palette);
                 return;
             }
             if app.portrait_search == Search::Browse {
@@ -297,7 +297,7 @@ fn rail_button(
     ui.add_sized([ui.available_width(), 42.], button).clicked()
 }
 
-fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
+fn sale_table(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette) {
     if app.cart.is_empty() {
         ui.weak("Кошик порожній");
         return;
@@ -316,6 +316,7 @@ fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
     } else {
         app.scanned_row = None;
     }
+    ui.spacing_mut().item_spacing.x = 1.;
     let width = (ui.available_width() - 12.).max(150.);
     let highlight_fill = highlighted.map(|(_, start)| {
         let opacity = ((1.8 - (now - start)) / 0.5).clamp(0., 1.) as f32;
@@ -327,6 +328,7 @@ fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
     let mut table = TableBuilder::new(ui)
         .striped(true)
         .auto_shrink([false, false])
+        .column(Column::exact(24.).clip(true))
         .column(Column::remainder().clip(true))
         .column(Column::exact(width * 0.18).clip(true))
         .column(Column::exact(width * 0.28).clip(true))
@@ -342,9 +344,15 @@ fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
     let mut remove = None;
     table
         .header(30., |mut header| {
-            for label in ["Товар", "К-сть", "Сума", ""] {
+            for (index, label) in ["№", "Товар", "К-сть", "Сума", ""].into_iter().enumerate()
+            {
                 header.col(|ui| {
-                    ui.strong(label);
+                    sheet_header(
+                        ui,
+                        palette,
+                        label,
+                        index.checked_sub(1).and_then(|i| ACCENTS.get(i).copied()),
+                    )
                 });
             }
         })
@@ -358,17 +366,32 @@ fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
                     return;
                 };
                 row.set_selected(highlighted.is_some_and(|(scanned, _)| scanned == id));
+                let number = row.index() + 1;
                 row.col(|ui| {
+                    sheet_border(ui, palette);
+                    ui.centered_and_justified(|ui| {
+                        ui.weak(number.to_string());
+                    });
+                });
+                row.col(|ui| {
+                    sheet_border(ui, palette);
                     ui.add(Label::new(&product.name).truncate())
                         .on_hover_text(&product.name);
                 });
                 row.col(|ui| {
-                    ui.add(egui::DragValue::new(quantity).range(1..=product.stock.max(1)));
+                    sheet_border(ui, palette);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add(egui::DragValue::new(quantity).range(1..=product.stock.max(1)));
+                    });
                 });
                 row.col(|ui| {
-                    ui.label(money(*quantity * *unit_price));
+                    sheet_border(ui, palette);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add(Label::new(money(*quantity * *unit_price)).truncate());
+                    });
                 });
                 row.col(|ui| {
+                    sheet_border(ui, palette);
                     if ui.small_button("×").on_hover_text("Видалити").clicked() {
                         remove = Some(id);
                     }
@@ -414,65 +437,49 @@ fn grid(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode: bool) 
     TableBuilder::new(ui)
         .auto_shrink([false, false])
         .striped(true)
-        .column(Column::exact(width * 0.48).clip(true))
-        .column(Column::exact(width * 0.32).clip(true))
+        .column(Column::exact(24.).clip(true))
         .column(Column::remainder().clip(true))
+        .column(Column::exact(width * 0.30).clip(true))
+        .column(Column::exact(width * 0.21).clip(true))
         .header(29., |mut header| {
-            for (index, label) in ["Товар", "Ціна", "Запас"].into_iter().enumerate() {
+            for (index, label) in ["№", "Товар", "Ціна", "Запас"].into_iter().enumerate()
+            {
                 header.col(|ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 0., palette.rail);
-                    ui.painter().hline(
-                        rect.x_range(),
-                        rect.bottom(),
-                        Stroke::new(2.0_f32, ACCENTS[index]),
-                    );
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        label,
-                        egui::FontId::proportional(12.),
-                        palette.ink,
-                    );
+                    sheet_header(ui, palette, label, index.checked_sub(1).map(|i| ACCENTS[i]))
                 });
             }
         })
         .body(|body| {
             body.rows(ROW_HEIGHT, rows, |mut row| {
                 let product = products.get(row.index()).copied();
+                let number = row.index() + 1;
                 let values = product
                     .map(|p| [p.name.clone(), money(p.price), p.stock.to_string()])
                     .unwrap_or_default();
-                for (index, text) in values.into_iter().enumerate() {
+                row.col(|ui| {
+                    sheet_border(ui, palette);
+                    ui.centered_and_justified(|ui| {
+                        ui.weak(number.to_string());
+                    });
+                });
+                for (index, value) in values.into_iter().enumerate() {
                     row.col(|ui| {
-                        let rect = ui.available_rect_before_wrap();
-                        ui.painter().hline(
-                            rect.x_range(),
-                            rect.bottom(),
-                            Stroke::new(1.0_f32, palette.line),
-                        );
-                        ui.painter().vline(
-                            rect.right(),
-                            rect.y_range(),
-                            Stroke::new(1.0_f32, palette.line),
-                        );
-                        let response = ui.add_sized(
-                            rect.size(),
-                            Label::new(RichText::new(text).size(12.).color(
-                                if index == 0 || !app.dark {
-                                    palette.ink
-                                } else {
-                                    ACCENTS[index]
-                                },
-                            ))
+                        sheet_border(ui, palette);
+                        let label = Label::new(RichText::new(value).size(12.).color(palette.ink))
                             .truncate()
                             .sense(if product.is_some() {
                                 egui::Sense::click()
                             } else {
                                 egui::Sense::hover()
-                            }),
-                        );
+                            });
+                        let response = if index == 0 {
+                            ui.add_sized(ui.available_size(), label)
+                        } else {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.add(label)
+                            })
+                            .inner
+                        };
                         if response.clicked() {
                             selected = product.cloned();
                         }
@@ -483,6 +490,35 @@ fn grid(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode: bool) 
     if let Some(product) = selected {
         app.add(&product);
     }
+}
+
+fn sheet_border(ui: &egui::Ui, palette: &Palette) {
+    let rect = ui.available_rect_before_wrap();
+    let stroke = Stroke::new(1.0_f32, palette.line);
+    ui.painter().hline(rect.x_range(), rect.bottom(), stroke);
+    ui.painter().vline(rect.right(), rect.y_range(), stroke);
+}
+
+fn sheet_header(ui: &mut egui::Ui, palette: &Palette, label: &str, accent: Option<Color32>) {
+    let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 0., palette.rail);
+    ui.painter().vline(
+        rect.right(),
+        rect.y_range(),
+        Stroke::new(1.0_f32, palette.line),
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(2.0_f32, accent.unwrap_or(palette.line)),
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(12.),
+        palette.ink,
+    );
 }
 
 #[cfg(test)]
@@ -536,6 +572,7 @@ mod tests {
                 None
             })
         };
+        let _ = text_position("№").expect("spreadsheet row-number column appears");
         let product = text_position("Кава").expect("catalogue row appears in portrait");
         let checkout = text_position("Тестовий розрахунок").expect("checkout stays visible");
         assert!(checkout.y > 680. && product.y < checkout.y);
