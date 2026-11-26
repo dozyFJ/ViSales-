@@ -94,6 +94,62 @@ impl Store {
         Ok(())
     }
 
+    pub fn add_demo_products(&mut self) -> Result<usize> {
+        // These are internal barcodes and fixed seed values in kopiykas.
+        let items = [
+            ("Цемент М500, 25 кг", 14800, 19900, 32),
+            ("Шпаклівка фінішна, 5 кг", 10500, 14900, 18),
+            ("Піна монтажна, 750 мл", 15100, 21900, 24),
+            ("Саморізи по дереву 4×40, 100 шт.", 3100, 4900, 50),
+            ("Рулетка будівельна, 5 м", 8100, 12900, 14),
+            ("Рукавички робочі, пара", 1700, 2900, 48),
+            ("Лампа LED E27, 9 Вт", 3500, 5900, 36),
+            ("Подовжувач на 3 розетки, 3 м", 16600, 23900, 9),
+            ("Батарейки AA, 4 шт.", 5400, 7900, 26),
+            ("Рис довгозернистий, 1 кг", 4750, 6290, 27),
+            ("Кава мелена, 250 г", 12400, 16900, 16),
+            ("Чай чорний, 25 пакетиків", 3900, 5950, 23),
+            ("Вода негазована, 1,5 л", 1300, 2190, 42),
+            ("Засіб для миття посуду, 500 мл", 3600, 5490, 20),
+            ("Серветки паперові, 100 шт.", 1900, 3290, 28),
+            ("Губки кухонні, 5 шт.", 2100, 3490, 25),
+            ("Зошит у клітинку, 48 аркушів", 1500, 2490, 40),
+            ("Ручка кулькова синя", 550, 1290, 65),
+            ("Ґрунт універсальний, 5 л", 3800, 5990, 15),
+            ("Корм для котів сухий, 400 г", 6300, 8990, 22),
+            ("Корм для собак вологий, 100 г", 1290, 2190, 44),
+            ("Наповнювач для котів, 5 л", 9200, 13900, 12),
+            ("Поводок для собак, 1,5 м", 7900, 11900, 8),
+            ("Іграшка для котів, м'ячик", 1600, 2990, 20),
+        ];
+        let tx = self.0.transaction_with_behavior(Immediate)?;
+        let mut added = 0;
+        {
+            let mut insert = tx.prepare(
+                "INSERT INTO product(barcode,name,cost,price,stock) VALUES(?1,?2,?3,?4,?5)
+                 ON CONFLICT(barcode) DO NOTHING",
+            )?;
+            for (index, (name, cost, price, stock)) in items.into_iter().enumerate() {
+                let digits = format!("20000000{:04}", index + 1);
+                let sum: u8 = digits
+                    .bytes()
+                    .enumerate()
+                    .map(|(position, digit)| (digit - b'0') * if position % 2 == 0 { 1 } else { 3 })
+                    .sum();
+                let barcode = format!("{digits}{}", (10 - sum % 10) % 10);
+                added += insert.execute(params![
+                    barcode,
+                    format!("{name} [Тест]"),
+                    cost,
+                    price,
+                    stock
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(added)
+    }
+
     pub fn count(&mut self, product: i64, counted: i64) -> Result<()> {
         let tx = self.0.transaction_with_behavior(Immediate)?;
         ensure!(tx.execute(
@@ -233,6 +289,18 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn demo_catalog_can_be_added_again_without_resetting_stock() -> Result<()> {
+        let mut store = Store::open(Path::new(":memory:"))?;
+        assert_eq!(store.add_demo_products()?, 24);
+        let product = store.products()?.remove(0);
+        assert!(product.stock > 0);
+        store.count(product.id, 1)?;
+        assert_eq!(store.add_demo_products()?, 0);
+        assert_eq!(store.products()?.remove(0).stock, 1);
+        Ok(())
+    }
 
     #[test]
     fn cash_sale_is_atomic_and_refund_materializes_once() -> Result<()> {

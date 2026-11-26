@@ -158,6 +158,8 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                         app.portrait_search = mode;
                     }
                 }
+                #[cfg(target_os = "android")]
+                app.camera_button(ui);
                 let count: i64 = app.cart.values().map(|(quantity, _)| quantity).sum();
                 ui.label(RichText::new(format!("{count} шт.")).size(11.));
             });

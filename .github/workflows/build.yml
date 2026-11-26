@@ -29,13 +29,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
       - name: Install Android SDK packages
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install \
             'platforms;android-34' 'build-tools;34.0.0' 'ndk;27.2.12479018'
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - run: cargo install cargo-apk --version 0.10.0 --locked
-      - run: cargo apk build --lib
+      - run: android/build-apk.sh
       - uses: actions/upload-artifact@v4
         with:
           name: ViSales-Android-arm64

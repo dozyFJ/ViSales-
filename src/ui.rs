@@ -56,6 +56,10 @@ pub struct ViSales {
     sales: Vec<Sale>,
     cart: BTreeMap<i64, (i64, i64)>,
     pos_tab: usize,
+    #[cfg(target_os = "android")]
+    android_app: Option<winit::platform::android::activity::AndroidApp>,
+    #[cfg(target_os = "android")]
+    scanning: bool,
     portrait_search: portrait_pos::Search,
     page: usize,
     dark: bool,
@@ -89,6 +93,10 @@ impl ViSales {
             sales: Vec::new(),
             cart: BTreeMap::new(),
             pos_tab: 0,
+            #[cfg(target_os = "android")]
+            android_app: None,
+            #[cfg(target_os = "android")]
+            scanning: false,
             portrait_search: portrait_pos::Search::Product,
             page: 0,
             dark: true,
@@ -151,7 +159,67 @@ impl ViSales {
         }
     }
 
+    #[cfg(target_os = "android")]
+    pub fn with_android_app(
+        mut self,
+        app: Option<winit::platform::android::activity::AndroidApp>,
+    ) -> Self {
+        self.android_app = app;
+        self
+    }
+
+    #[cfg(target_os = "android")]
+    fn camera_button(&mut self, ui: &mut Ui) {
+        if ui
+            .add_enabled(
+                self.store.is_some() && !self.scanning,
+                egui::Button::new("Камера").min_size(egui::vec2(0., 44.)),
+            )
+            .clicked()
+        {
+            if self
+                .android_app
+                .as_ref()
+                .is_some_and(|app| crate::android_scanner::start(app).is_ok())
+            {
+                self.scanning = true;
+                ui.ctx().request_repaint();
+            } else {
+                self.notice = Some((false, "Не вдалося запустити сканер".into()));
+            }
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn poll_camera(&mut self, ctx: &egui::Context) {
+        if !self.scanning {
+            return;
+        }
+        let Some(app) = &self.android_app else {
+            return;
+        };
+        let result = match crate::android_scanner::take(app) {
+            Ok(None) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(160));
+                return;
+            }
+            Ok(Some(result)) => result,
+            Err(_) => "error:Не вдалося прочитати результат сканування".into(),
+        };
+        self.scanning = false;
+        if let Some(barcode) = result.strip_prefix("code:") {
+            self.search = barcode.into();
+            self.portrait_search = portrait_pos::Search::Barcode;
+            self.notice = None;
+            self.add_barcode();
+        } else if let Some(error) = result.strip_prefix("error:") {
+            self.notice = Some((false, error.into()));
+        }
+    }
+
     fn pos(&mut self, ui: &mut Ui) {
+        #[cfg(target_os = "android")]
+        self.camera_button(ui);
         let search = ui.add(
             TextEdit::singleline(&mut self.search)
                 .desired_width(f32::INFINITY)
@@ -288,6 +356,18 @@ impl ViSales {
     }
 
     fn catalog(&mut self, ui: &mut Ui) {
+        if ui.button("Додати тестові товари").clicked() {
+            let result = (|| {
+                let added = self.store()?.add_demo_products()?;
+                self.refresh()?;
+                Ok(if added == 0 {
+                    "Тестові товари вже є в каталозі".into()
+                } else {
+                    format!("Додано тестових товарів: {added}")
+                })
+            })();
+            self.result(result);
+        }
         card(ui, |ui| {
             ui.heading("Картка товару");
             ui.horizontal_wrapped(|ui| {
@@ -583,6 +663,16 @@ impl ViSales {
     }
 
     fn integrations(&mut self, ui: &mut Ui) {
+        #[cfg(target_os = "android")]
+        if ui.button("Перевірити оновлення ViSales").clicked()
+            && !self
+                .android_app
+                .as_ref()
+                .is_some_and(|app| crate::android_scanner::check_updates(app).is_ok())
+        {
+            self.notice = Some((false, "Не вдалося запустити перевірку оновлень".into()));
+        }
+
         card(ui, |ui| {
             ui.heading("Обмін Excel");
             ui.label("Перший аркуш — каталог. Імпорт оновлює картки за штрихкодом. Залишки змінюються через склад.");
@@ -653,6 +743,8 @@ impl ViSales {
 
 impl eframe::App for ViSales {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        #[cfg(target_os = "android")]
+        self.poll_camera(ctx);
         let screen = ctx.screen_rect();
         let portrait = screen.width() < screen.height();
         if portrait && self.page == 0 {

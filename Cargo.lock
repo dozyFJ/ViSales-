@@ -2782,12 +2782,13 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "visales"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "calamine",
  "eframe",
  "egui_extras",
+ "jni",
  "rusqlite",
  "rust_xlsxwriter",
  "winit",
