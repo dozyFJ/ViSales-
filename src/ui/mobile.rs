@@ -111,8 +111,7 @@ fn tab(app: &mut ViSales, ui: &mut egui::Ui, index: usize, label: &str, height: 
         Stroke::new(1.0_f32, accent(app.dark))
     } else {
         widgets.inactive.bg_stroke
-    })
-    .corner_radius(8);
+    });
     if ui
         .add_sized([ui.available_width(), height], button)
         .clicked()
@@ -125,9 +124,8 @@ pub(super) fn pills(ui: &mut egui::Ui, selected: &mut usize, labels: &[&str], da
     ui.horizontal_wrapped(|ui| {
         for (index, label) in labels.iter().enumerate() {
             let active = index == *selected;
-            let mut button = Button::new(RichText::new(*label).strong())
-                .corner_radius(17)
-                .min_size(egui::vec2(82., 38.));
+            let mut button =
+                Button::new(RichText::new(*label).strong()).min_size(egui::vec2(82., 38.));
             if active {
                 button = button
                     .fill(ui.visuals().selection.bg_fill)

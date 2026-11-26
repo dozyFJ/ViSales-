@@ -46,6 +46,19 @@ pub fn visuals(dark: bool) -> egui::Visuals {
     } else {
         Color32::from_rgb(174, 204, 249)
     };
+    for widget in [
+        &mut v.widgets.noninteractive,
+        &mut v.widgets.inactive,
+        &mut v.widgets.hovered,
+        &mut v.widgets.active,
+        &mut v.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::ZERO;
+    }
+    v.window_corner_radius = egui::CornerRadius::ZERO;
+    v.menu_corner_radius = egui::CornerRadius::ZERO;
+    v.window_shadow = egui::Shadow::NONE;
+    v.popup_shadow = egui::Shadow::NONE;
     v
 }
 
@@ -56,6 +69,8 @@ pub struct ViSales {
     sales: Vec<Sale>,
     cart: BTreeMap<i64, (i64, i64)>,
     pos_tab: usize,
+    scanned_row: Option<(i64, f64)>,
+    scroll_to_scan: Option<i64>,
     #[cfg(target_os = "android")]
     android_app: Option<winit::platform::android::activity::AndroidApp>,
     #[cfg(target_os = "android")]
@@ -93,6 +108,8 @@ impl ViSales {
             sales: Vec::new(),
             cart: BTreeMap::new(),
             pos_tab: 0,
+            scanned_row: None,
+            scroll_to_scan: None,
             #[cfg(target_os = "android")]
             android_app: None,
             #[cfg(target_os = "android")]
@@ -149,14 +166,14 @@ impl ViSales {
         });
     }
 
-    fn add(&mut self, p: &Product) {
-        let entry = self.cart.entry(p.id).or_insert((0, p.price));
-        if entry.0 >= p.stock {
+    fn add(&mut self, p: &Product) -> bool {
+        let quantity = self.cart.get(&p.id).map_or(0, |entry| entry.0);
+        if quantity >= p.stock {
             self.notice = Some((false, "Недостатній залишок".into()));
-        } else {
-            entry.0 += 1;
-            entry.1 = p.price;
+            return false;
         }
+        self.cart.insert(p.id, (quantity + 1, p.price));
+        true
     }
 
     #[cfg(target_os = "android")]
@@ -208,10 +225,7 @@ impl ViSales {
         };
         self.scanning = false;
         if let Some(barcode) = result.strip_prefix("code:") {
-            self.search = barcode.into();
-            self.portrait_search = portrait_pos::Search::Barcode;
-            self.notice = None;
-            self.add_barcode();
+            self.receive_scan(barcode, ctx.input(|input| input.time));
         } else if let Some(error) = result.strip_prefix("error:") {
             self.notice = Some((false, error.into()));
         }
@@ -297,17 +311,35 @@ impl ViSales {
         });
     }
 
-    fn add_barcode(&mut self) {
+    fn add_barcode(&mut self) -> Option<i64> {
         if let Some(product) = self
             .products
             .iter()
             .find(|p| p.barcode == self.search.trim())
             .cloned()
         {
-            self.add(&product);
             self.search.clear();
-        } else if !self.search.trim().is_empty() {
+            return self.add(&product).then_some(product.id);
+        }
+        if !self.search.trim().is_empty() {
             self.notice = Some((false, "Штрихкод не знайдено".into()));
+        }
+        None
+    }
+
+    #[cfg(any(target_os = "android", test))]
+    fn receive_scan(&mut self, barcode: &str, time: f64) {
+        self.search = barcode.into();
+        self.notice = None;
+        if let Some(id) = self.add_barcode() {
+            self.portrait_search = portrait_pos::Search::Cart;
+            self.pos_tab = 1;
+            self.scanned_row = Some((id, time));
+            self.scroll_to_scan = Some(id);
+            self.notice = Some((true, "Товар додано до поточного продажу".into()));
+        } else {
+            self.portrait_search = portrait_pos::Search::Barcode;
+            self.pos_tab = 0;
         }
     }
 
@@ -805,7 +837,6 @@ fn card(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
     Frame::new()
         .fill(ui.visuals().window_fill)
         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-        .corner_radius(9)
         .inner_margin(13)
         .show(ui, content);
 }

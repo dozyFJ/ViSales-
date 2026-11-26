@@ -6,9 +6,16 @@ import android.app.NativeActivity;
 import android.content.pm.PackageManager;
 import android.hardware.Camera;
 import android.graphics.ImageFormat;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.drawable.ColorDrawable;
+import android.content.Context;
 import android.view.SurfaceHolder;
+import android.view.View;
 import android.view.SurfaceView;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.view.WindowManager;
@@ -25,6 +32,13 @@ public final class ScannerActivity extends NativeActivity {
     private final java.util.concurrent.atomic.AtomicReference<String> scanResult = new java.util.concurrent.atomic.AtomicReference<>();
     private Dialog scanner;
     private Camera camera;
+    private ScanGuide guide;
+    private TextView hint;
+    private boolean recognized;
+    private static final float GUIDE_WIDTH = 0.82f;
+    private static final float GUIDE_HEIGHT = 0.28f;
+    private static final int PANEL = 0xff22292e;
+    private static final int TEXT = 0xffe6edf1;
     private String completedResult;
     private final Updater updater = new Updater(this);
     private boolean checkedUpdates;
@@ -70,22 +84,42 @@ public final class ScannerActivity extends NativeActivity {
 
     private void openScanner() {
         completedResult = "cancel:";
+        recognized = false;
         scanner = new Dialog(this);
+        scanner.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
-        TextView hint = new TextView(this);
-        hint.setText("Наведіть камеру на штрихкод");
-        layout.addView(hint);
+        layout.setBackgroundColor(PANEL);
+        hint = new TextView(this);
+        hint.setText("Помістіть штрихкод у рамку");
+        hint.setTextSize(16);
+        hint.setTextColor(TEXT);
+        hint.setGravity(android.view.Gravity.CENTER);
+        layout.addView(hint, new LinearLayout.LayoutParams(-1, dp(52)));
+
+        FrameLayout cameraView = new FrameLayout(this);
+        layout.addView(cameraView, new LinearLayout.LayoutParams(-1, 0, 1));
         SurfaceView preview = new SurfaceView(this);
-        layout.addView(preview, new LinearLayout.LayoutParams(-1, 0, 1));
+        cameraView.addView(preview, new FrameLayout.LayoutParams(-1, -1));
+        guide = new ScanGuide(this);
+        cameraView.addView(guide, new FrameLayout.LayoutParams(-1, -1));
+
         Button cancel = new Button(this);
         cancel.setText("Скасувати");
+        cancel.setAllCaps(false);
+        cancel.setTextColor(TEXT);
+        cancel.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x32ffffff),
+            new ColorDrawable(0xff344550), null));
+        cancel.setStateListAnimator(null);
         cancel.setOnClickListener(view -> scanner.dismiss());
-        layout.addView(cancel);
+        layout.addView(cancel, new LinearLayout.LayoutParams(-1, dp(52)));
         scanner.setContentView(layout);
         scanner.setOnDismissListener(dialog -> {
             closeCamera();
             scanner = null;
+            guide = null;
+            hint = null;
             scanResult.set(completedResult);
         });
         preview.getHolder().addCallback(new SurfaceHolder.Callback() {
@@ -93,6 +127,7 @@ public final class ScannerActivity extends NativeActivity {
             @Override public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {}
             @Override public void surfaceDestroyed(SurfaceHolder holder) { closeCamera(); }
         });
+        scanner.getWindow().setBackgroundDrawable(new ColorDrawable(PANEL));
         scanner.getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         scanner.show();
         scanner.getWindow().setLayout(-1, -1);
@@ -112,18 +147,20 @@ public final class ScannerActivity extends NativeActivity {
             Camera.CameraInfo info = new Camera.CameraInfo();
             Camera.getCameraInfo(0, info);
             int rotation = getWindowManager().getDefaultDisplay().getRotation() * 90;
-            camera.setDisplayOrientation((info.orientation - rotation + 360) % 360);
+            int orientation = (info.orientation - rotation + 360) % 360;
+            boolean swapped = orientation % 180 != 0;
+            camera.setDisplayOrientation(orientation);
             camera.setPreviewDisplay(holder);
             MultiFormatReader reader = new MultiFormatReader();
             camera.setPreviewCallback(new Camera.PreviewCallback() {
                 private long lastFrame;
                 @Override public void onPreviewFrame(byte[] data, Camera source) {
                     long now = android.os.SystemClock.elapsedRealtime();
-                    if (now - lastFrame < 180 || data == null || scanner == null) return;
+                    if (now - lastFrame < 180 || data == null || scanner == null || recognized) return;
                     lastFrame = now;
                     // The Y plane is first in the NV21 preview. Decode the central area.
-                    int w = frame.width * 4 / 5;
-                    int h = frame.height * 3 / 5;
+                    int w = Math.max(1, (int) (frame.width * (swapped ? GUIDE_HEIGHT : GUIDE_WIDTH)));
+                    int h = Math.max(1, (int) (frame.height * (swapped ? GUIDE_WIDTH : GUIDE_HEIGHT)));
                     PlanarYUVLuminanceSource luminance = new PlanarYUVLuminanceSource(
                         data, frame.width, frame.height, (frame.width - w) / 2, (frame.height - h) / 2, w, h, false);
                     try {
@@ -143,8 +180,14 @@ public final class ScannerActivity extends NativeActivity {
                             barcode = reader.decode(new BinaryBitmap(new HybridBinarizer(
                                 new RGBLuminanceSource(h, w, rotated)))).getText();
                         }
+                        recognized = true;
                         completedResult = "code:" + barcode;
-                        scanner.dismiss();
+                        guide.invalidate();
+                        hint.setText("Штрихкод зчитано");
+                        Dialog current = scanner;
+                        guide.postDelayed(() -> {
+                            if (scanner == current) current.dismiss();
+                        }, 300);
                     } catch (NotFoundException unreadable) {
                         reader.reset();
                     }
@@ -154,6 +197,48 @@ public final class ScannerActivity extends NativeActivity {
         } catch (java.io.IOException | RuntimeException error) {
             completedResult = "error:Не вдалося відкрити камеру";
             if (scanner != null) scanner.dismiss();
+        }
+    }
+
+    private int dp(int size) {
+        return Math.round(size * getResources().getDisplayMetrics().density);
+    }
+
+    private final class ScanGuide extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF bounds = new RectF();
+
+        ScanGuide(Context context) {
+            super(context);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float width = getWidth();
+            float height = getHeight();
+            bounds.set(width * (1 - GUIDE_WIDTH) / 2, height * (1 - GUIDE_HEIGHT) / 2,
+                width * (1 + GUIDE_WIDTH) / 2, height * (1 + GUIDE_HEIGHT) / 2);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0x900c1218);
+            canvas.drawRect(0, 0, width, bounds.top, paint);
+            canvas.drawRect(0, bounds.bottom, width, height, paint);
+            canvas.drawRect(0, bounds.top, bounds.left, bounds.bottom, paint);
+            canvas.drawRect(bounds.right, bounds.top, width, bounds.bottom, paint);
+            int accent = recognized ? 0xff8dc771 : 0xff66b3d5;
+            paint.setColor(accent);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            canvas.drawRect(bounds, paint);
+            if (recognized) {
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(0x388dc771);
+                canvas.drawRect(bounds, paint);
+            } else {
+                float phase = (android.os.SystemClock.uptimeMillis() % 1600) / 1600f;
+                float y = bounds.top + (1 - Math.abs(2 * phase - 1)) * bounds.height();
+                canvas.drawLine(bounds.left, y, bounds.right, y, paint);
+                postInvalidateOnAnimation();
+            }
         }
     }
 

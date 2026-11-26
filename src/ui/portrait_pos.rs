@@ -95,7 +95,6 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                             .color(Color32::from_rgb(28, 42, 51)),
                     )
                     .fill(palette.action)
-                    .corner_radius(20)
                     .min_size(egui::vec2(0., 42.));
                     if ui
                         .add_enabled(!app.cart.is_empty() && app.store.is_some(), checkout)
@@ -146,7 +145,6 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                         palette.ink
                     };
                     let button = Button::new(RichText::new(label).size(12.).strong().color(ink))
-                        .corner_radius(19)
                         .fill(if active { palette.action } else { palette.grid });
                     if ui.add_sized([ui.available_width(), 44.], button).clicked() {
                         if mode != Search::Cart {
@@ -173,7 +171,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             }
             if app.portrait_search == Search::Cart {
                 ui.heading("Кошик");
-                egui::ScrollArea::vertical().show(ui, |ui| app.cart_lines(ui));
+                sale_table(app, ui);
                 return;
             }
             let barcode = app.portrait_search == Search::Barcode;
@@ -193,6 +191,80 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             }
             grid(app, ui, &palette, barcode);
         });
+}
+
+fn sale_table(app: &mut ViSales, ui: &mut egui::Ui) {
+    if app.cart.is_empty() {
+        ui.weak("Кошик порожній");
+        return;
+    }
+
+    let ids: Vec<_> = app.cart.keys().copied().collect();
+    let now = ui.input(|input| input.time);
+    let highlighted = app.scanned_row.filter(|(_, time)| now - time < 1.8);
+    if let Some((_, start)) = highlighted {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(
+                (1.8 - (now - start)).clamp(0., 1.8),
+            ));
+    } else {
+        app.scanned_row = None;
+    }
+    let width = (ui.available_width() - 12.).max(150.);
+    let mut table = TableBuilder::new(ui)
+        .striped(true)
+        .auto_shrink([false, false])
+        .column(Column::remainder().clip(true))
+        .column(Column::exact(width * 0.18).clip(true))
+        .column(Column::exact(width * 0.28).clip(true))
+        .column(Column::exact(30.));
+    if let Some(row) = app
+        .scroll_to_scan
+        .take()
+        .and_then(|id| ids.iter().position(|candidate| *candidate == id))
+    {
+        table = table.scroll_to_row(row, Some(egui::Align::Center));
+    }
+
+    let mut remove = None;
+    table
+        .header(30., |mut header| {
+            for label in ["Товар", "К-сть", "Сума", ""] {
+                header.col(|ui| {
+                    ui.strong(label);
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(44., ids.len(), |mut row| {
+                let id = ids[row.index()];
+                let Some(product) = app.products.iter().find(|product| product.id == id) else {
+                    return;
+                };
+                let Some((quantity, unit_price)) = app.cart.get_mut(&id) else {
+                    return;
+                };
+                row.set_selected(highlighted.is_some_and(|(scanned, _)| scanned == id));
+                row.col(|ui| {
+                    ui.add(Label::new(&product.name).truncate())
+                        .on_hover_text(&product.name);
+                });
+                row.col(|ui| {
+                    ui.add(egui::DragValue::new(quantity).range(1..=product.stock.max(1)));
+                });
+                row.col(|ui| {
+                    ui.label(money(*quantity * *unit_price));
+                });
+                row.col(|ui| {
+                    if ui.small_button("×").on_hover_text("Видалити").clicked() {
+                        remove = Some(id);
+                    }
+                });
+            });
+        });
+    if let Some(id) = remove {
+        app.cart.remove(&id);
+    }
 }
 
 fn grid(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode: bool) {
@@ -363,6 +435,14 @@ mod tests {
             ]);
         }
         assert_eq!(app.cart_total(), 6900);
+        app.receive_scan("123", 1.0);
+        assert!(app.portrait_search == Search::Cart);
+        assert_eq!(app.cart_total(), 13_800);
+        assert_eq!(app.scanned_row, Some((app.products[0].id, 1.0)));
+        app.receive_scan("невідомий", 1.1);
+        assert!(app.portrait_search == Search::Barcode);
+        assert_eq!(app.cart_total(), 13_800);
+
         drop(app);
         std::fs::remove_dir_all(directory)?;
         Ok(())
