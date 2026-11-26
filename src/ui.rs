@@ -1,4 +1,5 @@
 mod mobile;
+mod portrait_pos;
 
 use crate::{
     exchange,
@@ -55,6 +56,7 @@ pub struct ViSales {
     sales: Vec<Sale>,
     cart: BTreeMap<i64, (i64, i64)>,
     pos_tab: usize,
+    portrait_search: portrait_pos::Search,
     page: usize,
     dark: bool,
     search: String,
@@ -87,6 +89,7 @@ impl ViSales {
             sales: Vec::new(),
             cart: BTreeMap::new(),
             pos_tab: 0,
+            portrait_search: portrait_pos::Search::Product,
             page: 0,
             dark: true,
             search: String::new(),
@@ -155,17 +158,7 @@ impl ViSales {
                 .hint_text("Знайти товар або ввести штрихкод"),
         );
         if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Some(product) = self
-                .products
-                .iter()
-                .find(|p| p.barcode == self.search.trim())
-                .cloned()
-            {
-                self.add(&product);
-                self.search.clear();
-            } else if !self.search.trim().is_empty() {
-                self.notice = Some((false, "Штрихкод не знайдено".into()));
-            }
+            self.add_barcode();
             search.request_focus();
         }
 
@@ -220,32 +213,9 @@ impl ViSales {
     fn pos_cart(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
             ui.heading("Поточний продаж");
-            let mut remove = None;
-            for (&id, (quantity, price)) in &mut self.cart {
-                let Some(product) = self.products.iter().find(|p| p.id == id) else {
-                    continue;
-                };
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(&product.name);
-                    ui.add(egui::DragValue::new(quantity).range(1..=1_000_000));
-                    ui.label(money(*quantity * *price));
-                    if ui.small_button("Видалити").clicked() {
-                        remove = Some(id);
-                    }
-                });
-            }
-            if let Some(id) = remove {
-                self.cart.remove(&id);
-            }
-            if self.cart.is_empty() {
-                ui.weak("Кошик порожній");
-            }
+            self.cart_lines(ui);
             ui.separator();
-            let total: i64 = self
-                .cart
-                .values()
-                .map(|(quantity, price)| quantity * price)
-                .sum();
+            let total = self.cart_total();
             ui.label(RichText::new(money(total)).size(30.).strong());
             if ui
                 .add_enabled(
@@ -254,19 +224,67 @@ impl ViSales {
                 )
                 .clicked()
             {
-                let result = (|| {
-                    let id = self
-                        .store
-                        .as_mut()
-                        .context("Сховище недоступне")?
-                        .sell(&self.cart)?;
-                    self.cart.clear();
-                    self.refresh()?;
-                    Ok(format!("Тестовий продаж №{id} записано локально"))
-                })();
-                self.result(result);
+                self.checkout();
             }
         });
+    }
+
+    fn add_barcode(&mut self) {
+        if let Some(product) = self
+            .products
+            .iter()
+            .find(|p| p.barcode == self.search.trim())
+            .cloned()
+        {
+            self.add(&product);
+            self.search.clear();
+        } else if !self.search.trim().is_empty() {
+            self.notice = Some((false, "Штрихкод не знайдено".into()));
+        }
+    }
+
+    fn cart_total(&self) -> i64 {
+        self.cart
+            .values()
+            .map(|(quantity, price)| quantity * price)
+            .sum()
+    }
+
+    fn cart_lines(&mut self, ui: &mut Ui) {
+        let mut remove = None;
+        for (&id, (quantity, price)) in &mut self.cart {
+            let Some(product) = self.products.iter().find(|p| p.id == id) else {
+                continue;
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.label(&product.name);
+                ui.add(egui::DragValue::new(quantity).range(1..=1_000_000));
+                ui.label(money(*quantity * *price));
+                if ui.small_button("Видалити").clicked() {
+                    remove = Some(id);
+                }
+            });
+        }
+        if let Some(id) = remove {
+            self.cart.remove(&id);
+        }
+        if self.cart.is_empty() {
+            ui.weak("Кошик порожній");
+        }
+    }
+
+    fn checkout(&mut self) {
+        let result = (|| {
+            let id = self
+                .store
+                .as_mut()
+                .context("Сховище недоступне")?
+                .sell(&self.cart)?;
+            self.cart.clear();
+            self.refresh()?;
+            Ok(format!("Тестовий продаж №{id} записано локально"))
+        })();
+        self.result(result);
     }
 
     fn catalog(&mut self, ui: &mut Ui) {
@@ -637,6 +655,10 @@ impl eframe::App for ViSales {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         let screen = ctx.screen_rect();
         let portrait = screen.width() < screen.height();
+        if portrait && self.page == 0 {
+            portrait_pos::show(self, ctx);
+            return;
+        }
         let mobile_layout = cfg!(target_os = "android") || portrait || screen.width() < 840.;
         if mobile_layout {
             mobile::shell(self, ctx, portrait || screen.width() < 520.);
