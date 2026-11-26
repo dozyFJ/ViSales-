@@ -37,8 +37,8 @@ public final class ScannerActivity extends NativeActivity {
     private boolean recognized;
     private static final float GUIDE_WIDTH = 0.82f;
     private static final float GUIDE_HEIGHT = 0.28f;
-    private static final int PANEL = 0xff22292e;
-    private static final int TEXT = 0xffe6edf1;
+    private static final int PANEL = 0xff171919;
+    private static final int TEXT = 0xfff4f1e5;
     private String completedResult;
     private final Updater updater = new Updater(this);
     private boolean checkedUpdates;
@@ -110,7 +110,7 @@ public final class ScannerActivity extends NativeActivity {
         cancel.setTextColor(TEXT);
         cancel.setBackground(new android.graphics.drawable.RippleDrawable(
             android.content.res.ColorStateList.valueOf(0x32ffffff),
-            new ColorDrawable(0xff344550), null));
+            new ColorDrawable(0xff262929), null));
         cancel.setStateListAnimator(null);
         cancel.setOnClickListener(view -> scanner.dismiss());
         layout.addView(cancel, new LinearLayout.LayoutParams(-1, dp(52)));
@@ -224,7 +224,7 @@ public final class ScannerActivity extends NativeActivity {
             canvas.drawRect(0, bounds.bottom, width, height, paint);
             canvas.drawRect(0, bounds.top, bounds.left, bounds.bottom, paint);
             canvas.drawRect(bounds.right, bounds.top, width, bounds.bottom, paint);
-            int accent = recognized ? 0xff8dc771 : 0xff66b3d5;
+            int accent = recognized ? 0xff8dc771 : 0xffffd736;
             paint.setColor(accent);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(2));

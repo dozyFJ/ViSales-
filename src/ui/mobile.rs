@@ -1,6 +1,6 @@
 //! Layout adapted from ffight763-glitch/Vinteria-git3, src/ui/mobile.rs (204bdd9).
 
-use super::{PAGES, ViSales, visuals};
+use super::{PAGES, ViSales, theme, visuals};
 use eframe::egui::{self, Button, Color32, Frame, Margin, RichText, Stroke};
 
 const TOUCH: f32 = 46.;
@@ -31,25 +31,7 @@ pub(super) fn shell(app: &mut ViSales, ctx: &egui::Context, bottom_tabs: bool) {
                     }
                 });
             });
-            if app.dark {
-                let width = ui.available_width();
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 2.), egui::Sense::hover());
-                let mut mesh = egui::Mesh::default();
-                for (index, color) in [
-                    Color32::from_rgb(255, 79, 200),
-                    Color32::from_rgb(177, 107, 255),
-                    Color32::from_rgb(77, 163, 255),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    let x = rect.left() + rect.width() * index as f32 / 2.;
-                    mesh.colored_vertex(egui::pos2(x, rect.top()), color);
-                    mesh.colored_vertex(egui::pos2(x, rect.bottom()), color);
-                }
-                mesh.indices.extend([0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4]);
-                ui.painter().add(egui::Shape::mesh(mesh));
-            }
+            theme::signal_stripe(ui);
         });
     if bottom_tabs {
         egui::TopBottomPanel::bottom("mobile-tabs")
@@ -90,23 +72,19 @@ fn panel(ctx: &egui::Context, horizontal: i8, vertical: i8) -> Frame {
 }
 
 fn accent(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_rgb(93, 215, 225)
-    } else {
-        Color32::from_rgb(0, 104, 123)
-    }
+    if dark { theme::SIGNAL } else { theme::BLACK }
 }
 
 fn tab(app: &mut ViSales, ui: &mut egui::Ui, index: usize, label: &str, height: f32) {
     let active = index == app.page;
     let widgets = &ui.visuals().widgets;
     let button = Button::new(RichText::new(label).size(13.).strong().color(if active {
-        Color32::WHITE
+        theme::BLACK
     } else {
         ui.visuals().text_color()
     }))
     .fill(if active {
-        Color32::from_rgb(0, 105, 127)
+        theme::SIGNAL
     } else {
         widgets.inactive.bg_fill
     })
@@ -148,7 +126,7 @@ pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
     }
 
     egui::CentralPanel::default()
-        .frame(Frame::new().fill(Color32::from_rgb(28, 34, 41)))
+        .frame(Frame::new().fill(theme::BLACK))
         .show(ctx, |ui| {
             let center = ui.max_rect().center();
             let painter = ui.painter();
@@ -168,7 +146,7 @@ pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
                 painter.circle_filled(
                     point,
                     1.5 + phase,
-                    Color32::from_rgb(98, 188, 219).linear_multiply(0.3 + 0.7 * phase),
+                    theme::SIGNAL.linear_multiply(0.3 + 0.7 * phase),
                 );
             }
         });

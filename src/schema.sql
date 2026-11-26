@@ -101,3 +101,8 @@ CREATE TABLE IF NOT EXISTS cashier_profile (
 
 INSERT OR IGNORE INTO cashier_profile(login,password_hash)
 SELECT login,password_hash FROM cashier_access;
+
+CREATE TABLE IF NOT EXISTS product_category (
+  product INTEGER PRIMARY KEY REFERENCES product(id) ON DELETE CASCADE,
+  name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 48)
+) STRICT;

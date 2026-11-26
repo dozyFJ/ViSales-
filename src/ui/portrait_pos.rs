@@ -1,5 +1,10 @@
-use super::{PAGES, ViSales, admin, matches, money, visuals};
-use eframe::egui::{self, Button, Color32, Frame, Label, Margin, RichText, Stroke, TextEdit};
+use super::{
+    PAGES, ViSales, admin, matches, money,
+    theme::{self, Palette},
+    visuals,
+};
+use crate::store::Product;
+use eframe::egui::{self, Button, Color32, Frame, Label, RichText, Stroke, TextEdit};
 use egui_extras::{Column, TableBuilder};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -13,55 +18,7 @@ pub(super) enum Search {
     Receipts,
 }
 
-const ACCENTS: [Color32; 3] = [
-    Color32::from_rgb(235, 126, 143),
-    Color32::from_rgb(102, 179, 213),
-    Color32::from_rgb(141, 199, 113),
-];
-
-struct Palette {
-    grid: Color32,
-    rail: Color32,
-    line: Color32,
-    ink: Color32,
-    action: Color32,
-}
-
-impl Palette {
-    fn new(dark: bool) -> Self {
-        let [grid, rail, line, ink, action] = if dark {
-            [
-                [34, 41, 46],
-                [54, 67, 77],
-                [82, 94, 102],
-                [230, 237, 241],
-                [235, 243, 247],
-            ]
-        } else {
-            [
-                [239, 244, 247],
-                [218, 227, 233],
-                [163, 179, 190],
-                [32, 44, 54],
-                [190, 211, 225],
-            ]
-        };
-        Self {
-            grid: Color32::from_rgb(grid[0], grid[1], grid[2]),
-            rail: Color32::from_rgb(rail[0], rail[1], rail[2]),
-            line: Color32::from_rgb(line[0], line[1], line[2]),
-            ink: Color32::from_rgb(ink[0], ink[1], ink[2]),
-            action: Color32::from_rgb(action[0], action[1], action[2]),
-        }
-    }
-
-    fn panel(&self, horizontal: i8, vertical: i8) -> Frame {
-        Frame::new()
-            .fill(self.rail)
-            .stroke(Stroke::new(1.0_f32, self.line))
-            .inner_margin(Margin::symmetric(horizontal, vertical))
-    }
-}
+const ACCENTS: [Color32; 3] = [theme::SIGNAL, theme::STEEL, theme::SIGNAL];
 
 pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
     let palette = Palette::new(app.dark);
@@ -70,8 +27,13 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
         .exact_height(75.)
         .frame(palette.panel(9, 6))
         .show(ctx, |ui| {
+            theme::signal_stripe(ui);
             ui.horizontal(|ui| {
-                ui.strong(format!("ViSales · {}", PAGES[app.page]));
+                ui.label(
+                    RichText::new(format!("ViSales · {}", PAGES[app.page]))
+                        .size(18.)
+                        .strong(),
+                );
                 ui.label(
                     RichText::new(if app.access.unlocked {
                         "Адміністратор"
@@ -109,7 +71,10 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                     let total = money(app.cart_total());
                     columns[0].label(RichText::new("До сплати").size(11.));
                     columns[0]
-                        .add(Label::new(RichText::new(&total).size(18.).strong()).truncate())
+                        .add(
+                            Label::new(RichText::new(&total).size(20.).monospace().strong())
+                                .truncate(),
+                        )
                         .on_hover_text(total);
                     let caption = if ctx.screen_rect().width() < 330. {
                         "Розрахунок"
@@ -120,9 +85,10 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                         RichText::new(caption)
                             .size(12.)
                             .strong()
-                            .color(Color32::from_rgb(28, 42, 51)),
+                            .color(theme::BLACK),
                     )
                     .fill(palette.action)
+                    .stroke(Stroke::new(2.0_f32, theme::BLACK))
                     .min_size(egui::vec2(columns[1].available_width(), 42.))
                     .truncate();
                     if columns[1]
@@ -423,11 +389,13 @@ fn nav_button(
     let transition = ui
         .ctx()
         .animate_bool_with_time(ui.make_persistent_id(&label), active, 0.12);
-    let ink = palette
-        .ink
-        .lerp_to_gamma(Color32::from_rgb(28, 42, 51), transition);
+    let ink = palette.ink.lerp_to_gamma(theme::BLACK, transition);
     let button = Button::new(RichText::new(label).size(12.).strong().color(ink))
-        .fill(palette.grid.lerp_to_gamma(palette.action, transition));
+        .fill(palette.grid.lerp_to_gamma(palette.action, transition))
+        .stroke(Stroke::new(
+            2.0_f32,
+            if active { theme::BLACK } else { palette.line },
+        ));
     ui.add_sized([ui.available_width(), 42.], button).clicked()
 }
 
@@ -543,19 +511,18 @@ fn add_quick_product(app: &mut ViSales) {
         return;
     }
 
-    let exact_barcode = app
+    let mut scoped = app
         .products
         .iter()
+        .filter(|product| in_browse_category(app, product));
+    let exact_barcode = scoped
+        .clone()
         .find(|product| product.barcode.eq_ignore_ascii_case(&query));
     let product = if exact_barcode.is_some() {
         exact_barcode
     } else {
-        let mut found = app
-            .products
-            .iter()
-            .filter(|product| matches(product, &query));
-        let first = found.next();
-        if found.next().is_some() {
+        let first = scoped.find(|product| matches(product, &query));
+        if scoped.any(|product| matches(product, &query)) {
             app.notice = Some((false, "Виберіть потрібний товар зі списку".into()));
             return;
         }
@@ -571,12 +538,63 @@ fn add_quick_product(app: &mut ViSales) {
     }
 }
 
+fn in_browse_category(app: &ViSales, product: &Product) -> bool {
+    app.portrait_search != Search::Browse
+        || app
+            .browse_category
+            .as_ref()
+            .is_none_or(|category| product.category.as_ref() == Some(category))
+}
+
+fn category_sidebar(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette) {
+    let categories: std::collections::BTreeSet<_> = app
+        .products
+        .iter()
+        .filter_map(|product| product.category.as_deref())
+        .collect();
+    if app
+        .browse_category
+        .as_deref()
+        .is_some_and(|selected| !categories.contains(selected))
+    {
+        app.browse_category = None;
+    }
+    let choices =
+        std::iter::once((None, "Усі")).chain(categories.into_iter().map(|name| (Some(name), name)));
+    let width = (ui.available_width() * 0.27).clamp(76., 126.);
+    egui::SidePanel::left("product-categories")
+        .exact_width(width)
+        .resizable(false)
+        .frame(palette.panel(4, 6))
+        .show_inside(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for (value, title) in choices {
+                        if nav_button(ui, palette, title, app.browse_category.as_deref() == value) {
+                            app.browse_category = value.map(str::to_owned);
+                        }
+                    }
+                });
+        });
+}
+
 fn product_list(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode: bool) {
+    if app.portrait_search == Search::Browse && !app.products.is_empty() {
+        category_sidebar(app, ui, palette);
+    }
     let query = app.search.trim().to_lowercase();
     let state_id = ui.make_persistent_id("pos-list-query");
     let query_changed = ui.data_mut(|data| {
-        let current = (app.portrait_search, query.clone());
-        let changed = data.get_temp::<(Search, String)>(state_id).as_ref() != Some(&current);
+        let current = (
+            app.portrait_search,
+            query.clone(),
+            app.browse_category.clone(),
+        );
+        let changed = data
+            .get_temp::<(Search, String, Option<String>)>(state_id)
+            .as_ref()
+            != Some(&current);
         if changed {
             data.insert_temp(state_id, current);
         }
@@ -585,6 +603,7 @@ fn product_list(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode
     let products: Vec<_> = app
         .products
         .iter()
+        .filter(|product| in_browse_category(app, product))
         .filter(|product| {
             if barcode {
                 product.barcode.starts_with(&query)
@@ -593,9 +612,8 @@ fn product_list(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode
             }
         })
         .collect();
-
     if products.is_empty() {
-        ui.weak(if query.is_empty() {
+        ui.weak(if app.products.is_empty() {
             "Додайте товар у каталозі."
         } else {
             "Товарів не знайдено."
@@ -610,73 +628,111 @@ fn product_list(app: &mut ViSales, ui: &mut egui::Ui, palette: &Palette, barcode
     if query_changed {
         scroll = scroll.vertical_scroll_offset(0.);
     }
-    scroll.show_rows(ui, 64., products.len(), |ui, range| {
-        for product in &products[range] {
-            let stock = if product.stock > 0 {
-                format!("{} шт.", product.stock)
-            } else {
-                "Немає в наявності".into()
-            };
-            let (rect, _) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.), egui::Sense::hover());
-            let clickable = product.stock > 0;
-            let response = ui.interact(
-                rect,
-                ui.make_persistent_id(("product", product.id)),
-                if clickable {
-                    egui::Sense::click()
-                } else {
-                    egui::Sense::hover()
-                },
-            );
-            let fill = if clickable && response.hovered() {
-                palette.rail.lerp_to_gamma(palette.action, 0.14)
-            } else {
-                palette.rail
-            };
-            let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 0., fill);
-            painter.vline(
-                rect.left() + 1.,
-                rect.y_range(),
-                Stroke::new(2.0_f32, if clickable { ACCENTS[1] } else { palette.line }),
-            );
-            let content = rect.shrink2(egui::vec2(10., 6.));
-            let mut details = ui.new_child(
-                egui::UiBuilder::new()
-                    .id_salt(product.id)
-                    .max_rect(content)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            );
-            details.set_clip_rect(details.clip_rect().intersect(content));
-            details.add(
-                Label::new(RichText::new(&product.name).strong().color(palette.ink))
-                    .truncate()
-                    .selectable(false),
-            );
-            details.horizontal(|ui| {
-                ui.label(RichText::new(money(product.price)).strong());
-                ui.add(
-                    Label::new(RichText::new(&stock).weak())
-                        .truncate()
-                        .selectable(false),
-                );
+    let columns = if app.portrait_search == Search::Browse {
+        ((ui.available_width() / 105.) as usize).clamp(1, 4)
+    } else {
+        1
+    };
+    const HEIGHT: f32 = 91.;
+    scroll.show_rows(ui, HEIGHT, products.len().div_ceil(columns), |ui, range| {
+        for row in range {
+            let start = row * columns;
+            ui.horizontal(|ui| {
+                let gap = ui.spacing().item_spacing.x;
+                let width =
+                    ((ui.available_width() - gap * (columns - 1) as f32) / columns as f32).max(1.);
+                for product in products.iter().skip(start).take(columns) {
+                    if product_card(ui, palette, product, egui::vec2(width, HEIGHT)) {
+                        selected = Some((*product).clone());
+                    }
+                }
             });
-            response.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Button,
-                    clickable,
-                    format!("{} · {} · {}", product.name, money(product.price), stock),
-                )
-            });
-            if response.clicked() {
-                selected = Some((*product).clone());
-            }
         }
     });
     if let Some(product) = selected {
         app.add(&product);
     }
+}
+
+fn product_card(ui: &mut egui::Ui, palette: &Palette, product: &Product, size: egui::Vec2) -> bool {
+    let stock = if product.stock > 0 {
+        format!("{} шт.", product.stock)
+    } else {
+        "Немає в наявності".into()
+    };
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let clickable = product.stock > 0;
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id(("product", product.id)),
+        if clickable {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    let fill = if clickable && response.hovered() {
+        palette.rail.lerp_to_gamma(palette.action, 0.14)
+    } else {
+        palette.rail
+    };
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0., fill);
+    painter.rect_stroke(
+        rect.shrink(1.),
+        0.,
+        Stroke::new(2.0_f32, palette.line),
+        egui::StrokeKind::Inside,
+    );
+    let strip = egui::Rect::from_min_size(
+        rect.min + egui::vec2(2., 2.),
+        egui::vec2((rect.width() - 4.).max(0.), 3.),
+    );
+    painter.rect_filled(
+        strip,
+        0.,
+        if clickable {
+            theme::SIGNAL
+        } else {
+            theme::STEEL
+        },
+    );
+    let content = rect.shrink2(egui::vec2(8., 9.));
+    let mut details = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(product.id)
+            .max_rect(content)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    details.set_clip_rect(details.clip_rect().intersect(content));
+    details.add(
+        Label::new(RichText::new(&product.name).strong().color(palette.ink))
+            .truncate()
+            .selectable(false),
+    );
+    details.add(
+        Label::new(
+            RichText::new(money(product.price))
+                .size(15.)
+                .monospace()
+                .strong(),
+        )
+        .truncate()
+        .selectable(false),
+    );
+    details.add(
+        Label::new(RichText::new(&stock).weak())
+            .truncate()
+            .selectable(false),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            clickable,
+            format!("{} · {} · {}", product.name, money(product.price), stock),
+        )
+    });
+    response.on_hover_text(&product.name).clicked()
 }
 
 fn sheet_border(ui: &egui::Ui, palette: &Palette) {
@@ -833,6 +889,7 @@ mod tests {
             id: 0,
             barcode: "123".into(),
             name: "Кава".into(),
+            category: Some("Продукти".into()),
             cost: 4200,
             price: 6900,
             stock: 0,
@@ -872,7 +929,9 @@ mod tests {
         };
         assert!(text_position("№").is_none());
         assert!(text_position("3 шт.").is_some());
+        let category = text_position("Продукти").expect("category appears in the left sidebar");
         let product = text_position("Кава").expect("catalogue row appears in portrait");
+        assert!(category.x < product.x);
         let checkout = text_position("Тестовий розрахунок").expect("checkout stays visible");
         assert!(checkout.y > 620. && product.y < checkout.y);
         let dock_cash = text_position("Каса").expect("dock cash button appears");

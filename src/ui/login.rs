@@ -1,6 +1,6 @@
-use super::{ViSales, admin};
+use super::{ViSales, admin, theme};
 use anyhow::{Context, Result, ensure};
-use eframe::egui::{self, Button, Color32, Frame, Label, RichText, TextEdit};
+use eframe::egui::{self, Button, Frame, Label, RichText, TextEdit};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Role {
@@ -41,6 +41,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                         Frame::new()
                             .fill(ui.visuals().window_fill)
                             .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                            .shadow(theme::hard_shadow())
                             .inner_margin(16)
                             .show(ui, |ui| {
                                 ui.set_width((width - 32.).max(140.));
@@ -144,11 +145,11 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                                 } else {
                                     "Увійти"
                                 };
-                                let button = Button::new(
-                                    RichText::new(title).strong().color(Color32::WHITE),
-                                )
-                                .fill(Color32::from_rgb(36, 79, 142))
-                                .min_size(egui::vec2(ui.available_width(), 42.));
+                                let button =
+                                    Button::new(RichText::new(title).strong().color(theme::BLACK))
+                                        .fill(theme::SIGNAL)
+                                        .stroke(egui::Stroke::new(2.0_f32, theme::BLACK))
+                                        .min_size(egui::vec2(ui.available_width(), 42.));
                                 submit =
                                     ui.add_enabled(enabled, button).clicked() || (enabled && enter);
                             });
@@ -167,7 +168,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 app.access.unlocked = app.login.role == Role::Admin;
                 app.login.authenticated = true;
                 app.login.error = None;
-                app.navigate(if app.access.unlocked { admin::PAGE } else { 0 });
+                app.navigate(0);
                 ctx.request_repaint();
             }
             Err(error) => {

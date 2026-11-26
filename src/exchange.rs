@@ -44,6 +44,7 @@ pub fn import(path: &Path) -> Result<Vec<Product>> {
             id: 0,
             barcode,
             name: cell(1),
+            category: None,
             cost: parse_money(&cell(2))
                 .with_context(|| format!("Рядок {}: собівартість", index + 2))?,
             price: parse_money(&cell(3)).with_context(|| format!("Рядок {}: ціна", index + 2))?,
@@ -116,6 +117,7 @@ mod tests {
             id: 1,
             barcode: "000123".into(),
             name: "Кава".into(),
+            category: None,
             cost: 110,
             price: 999,
             stock: 7,

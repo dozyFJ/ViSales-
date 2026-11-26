@@ -14,6 +14,7 @@ pub struct Product {
     pub id: i64,
     pub barcode: String,
     pub name: String,
+    pub category: Option<String>,
     pub cost: i64,
     pub price: i64,
     pub stock: i64,
@@ -272,7 +273,7 @@ impl Store {
     pub fn products(&self) -> Result<Vec<Product>> {
         let mut query = self
             .0
-            .prepare("SELECT id,barcode,name,cost,price,stock FROM product ORDER BY name,id")?;
+            .prepare("SELECT p.id,p.barcode,p.name,p.cost,p.price,p.stock,c.name FROM product p LEFT JOIN product_category c ON c.product=p.id ORDER BY p.name,p.id")?;
         Ok(query
             .query_map([], |r| {
                 Ok(Product {
@@ -282,6 +283,7 @@ impl Store {
                     cost: r.get(3)?,
                     price: r.get(4)?,
                     stock: r.get(5)?,
+                    category: r.get(6)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
@@ -299,6 +301,22 @@ impl Store {
                  ON CONFLICT(barcode) DO UPDATE SET name=excluded.name,cost=excluded.cost,price=excluded.price",
                 params![p.barcode.trim(), p.name.trim(), p.cost, p.price],
             )?;
+            if let Some(category) = &p.category {
+                let category = category.trim();
+                ensure!(
+                    category.chars().count() <= 48,
+                    "Назва категорії має містити до 48 символів"
+                );
+                if category.is_empty() {
+                    tx.execute("DELETE FROM product_category WHERE product=(SELECT id FROM product WHERE barcode=?1)", [p.barcode.trim()])?;
+                } else {
+                    tx.execute(
+                        "INSERT INTO product_category(product,name) SELECT id,?2 FROM product WHERE barcode=?1
+                         ON CONFLICT(product) DO UPDATE SET name=excluded.name",
+                        params![p.barcode.trim(), category],
+                    )?;
+                }
+            }
         }
         tx.commit()?;
         Ok(())
@@ -307,30 +325,36 @@ impl Store {
     pub fn add_demo_products(&mut self) -> Result<usize> {
         // These are internal barcodes and fixed seed values in kopiykas.
         let items = [
-            ("Цемент М500, 25 кг", 14800, 19900, 32),
-            ("Шпаклівка фінішна, 5 кг", 10500, 14900, 18),
-            ("Піна монтажна, 750 мл", 15100, 21900, 24),
-            ("Саморізи по дереву 4×40, 100 шт.", 3100, 4900, 50),
-            ("Рулетка будівельна, 5 м", 8100, 12900, 14),
-            ("Рукавички робочі, пара", 1700, 2900, 48),
-            ("Лампа LED E27, 9 Вт", 3500, 5900, 36),
-            ("Подовжувач на 3 розетки, 3 м", 16600, 23900, 9),
-            ("Батарейки AA, 4 шт.", 5400, 7900, 26),
-            ("Рис довгозернистий, 1 кг", 4750, 6290, 27),
-            ("Кава мелена, 250 г", 12400, 16900, 16),
-            ("Чай чорний, 25 пакетиків", 3900, 5950, 23),
-            ("Вода негазована, 1,5 л", 1300, 2190, 42),
-            ("Засіб для миття посуду, 500 мл", 3600, 5490, 20),
-            ("Серветки паперові, 100 шт.", 1900, 3290, 28),
-            ("Губки кухонні, 5 шт.", 2100, 3490, 25),
-            ("Зошит у клітинку, 48 аркушів", 1500, 2490, 40),
-            ("Ручка кулькова синя", 550, 1290, 65),
-            ("Ґрунт універсальний, 5 л", 3800, 5990, 15),
-            ("Корм для котів сухий, 400 г", 6300, 8990, 22),
-            ("Корм для собак вологий, 100 г", 1290, 2190, 44),
-            ("Наповнювач для котів, 5 л", 9200, 13900, 12),
-            ("Поводок для собак, 1,5 м", 7900, 11900, 8),
-            ("Іграшка для котів, м'ячик", 1600, 2990, 20),
+            ("Будматеріали", "Цемент М500, 25 кг", 14800, 19900, 32),
+            ("Будматеріали", "Шпаклівка фінішна, 5 кг", 10500, 14900, 18),
+            ("Будматеріали", "Піна монтажна, 750 мл", 15100, 21900, 24),
+            (
+                "Будматеріали",
+                "Саморізи по дереву 4×40, 100 шт.",
+                3100,
+                4900,
+                50,
+            ),
+            ("Інструменти", "Рулетка будівельна, 5 м", 8100, 12900, 14),
+            ("Інструменти", "Рукавички робочі, пара", 1700, 2900, 48),
+            ("Електрика", "Лампа LED E27, 9 Вт", 3500, 5900, 36),
+            ("Електрика", "Подовжувач на 3 розетки, 3 м", 16600, 23900, 9),
+            ("Електрика", "Батарейки AA, 4 шт.", 5400, 7900, 26),
+            ("Продукти", "Рис довгозернистий, 1 кг", 4750, 6290, 27),
+            ("Продукти", "Кава мелена, 250 г", 12400, 16900, 16),
+            ("Продукти", "Чай чорний, 25 пакетиків", 3900, 5950, 23),
+            ("Продукти", "Вода негазована, 1,5 л", 1300, 2190, 42),
+            ("Дім", "Засіб для миття посуду, 500 мл", 3600, 5490, 20),
+            ("Дім", "Серветки паперові, 100 шт.", 1900, 3290, 28),
+            ("Дім", "Губки кухонні, 5 шт.", 2100, 3490, 25),
+            ("Канцелярія", "Зошит у клітинку, 48 аркушів", 1500, 2490, 40),
+            ("Канцелярія", "Ручка кулькова синя", 550, 1290, 65),
+            ("Сад", "Ґрунт універсальний, 5 л", 3800, 5990, 15),
+            ("Зоотовари", "Корм для котів сухий, 400 г", 6300, 8990, 22),
+            ("Зоотовари", "Корм для собак вологий, 100 г", 1290, 2190, 44),
+            ("Зоотовари", "Наповнювач для котів, 5 л", 9200, 13900, 12),
+            ("Зоотовари", "Поводок для собак, 1,5 м", 7900, 11900, 8),
+            ("Зоотовари", "Іграшка для котів, м'ячик", 1600, 2990, 20),
         ];
         let tx = self.0.transaction_with_behavior(Immediate)?;
         let mut added = 0;
@@ -339,7 +363,7 @@ impl Store {
                 "INSERT INTO product(barcode,name,cost,price,stock) VALUES(?1,?2,?3,?4,?5)
                  ON CONFLICT(barcode) DO NOTHING",
             )?;
-            for (index, (name, cost, price, stock)) in items.into_iter().enumerate() {
+            for (index, (category, name, cost, price, stock)) in items.into_iter().enumerate() {
                 let digits = format!("20000000{:04}", index + 1);
                 let sum: u8 = digits
                     .bytes()
@@ -347,13 +371,13 @@ impl Store {
                     .map(|(position, digit)| (digit - b'0') * if position % 2 == 0 { 1 } else { 3 })
                     .sum();
                 let barcode = format!("{digits}{}", (10 - sum % 10) % 10);
-                added += insert.execute(params![
-                    barcode,
-                    format!("{name} [Тест]"),
-                    cost,
-                    price,
-                    stock
-                ])?;
+                let name = format!("{name} [Тест]");
+                added += insert.execute(params![barcode, name, cost, price, stock])?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO product_category(product,name)
+                    SELECT id,?3 FROM product WHERE barcode=?1 AND name=?2",
+                    params![barcode, name, category],
+                )?;
             }
         }
         tx.commit()?;
@@ -830,6 +854,7 @@ mod tests {
                 id: 0,
                 barcode: "001".into(),
                 name: "Кава".into(),
+                category: None,
                 cost: 4500,
                 price: 7200,
                 stock: 0,
@@ -838,6 +863,7 @@ mod tests {
                 id: 0,
                 barcode: "002".into(),
                 name: "Чай".into(),
+                category: None,
                 cost: 2000,
                 price: 3300,
                 stock: 0,

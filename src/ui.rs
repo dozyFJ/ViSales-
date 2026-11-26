@@ -4,6 +4,7 @@ mod mobile;
 mod payment;
 mod portrait_pos;
 mod sale_details;
+mod theme;
 
 use crate::{
     exchange,
@@ -23,48 +24,10 @@ const PAGES: [&str; 7] = [
     "Інтеграції",
     "Адмінка",
 ];
-const ACCENT: Color32 = Color32::from_rgb(95, 154, 245);
+const ACCENT: Color32 = theme::SIGNAL;
 
 pub fn visuals(dark: bool) -> egui::Visuals {
-    let mut v = if dark {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    };
-    v.panel_fill = if dark {
-        Color32::from_rgb(27, 30, 36)
-    } else {
-        Color32::from_rgb(238, 241, 246)
-    };
-    v.window_fill = if dark {
-        Color32::from_rgb(35, 39, 46)
-    } else {
-        Color32::WHITE
-    };
-    v.extreme_bg_color = if dark {
-        Color32::from_rgb(20, 23, 28)
-    } else {
-        Color32::WHITE
-    };
-    v.selection.bg_fill = if dark {
-        Color32::from_rgb(45, 78, 124)
-    } else {
-        Color32::from_rgb(174, 204, 249)
-    };
-    for widget in [
-        &mut v.widgets.noninteractive,
-        &mut v.widgets.inactive,
-        &mut v.widgets.hovered,
-        &mut v.widgets.active,
-        &mut v.widgets.open,
-    ] {
-        widget.corner_radius = egui::CornerRadius::ZERO;
-    }
-    v.window_corner_radius = egui::CornerRadius::ZERO;
-    v.menu_corner_radius = egui::CornerRadius::ZERO;
-    v.window_shadow = egui::Shadow::NONE;
-    v.popup_shadow = egui::Shadow::NONE;
-    v
+    theme::visuals(dark)
 }
 
 pub struct ViSales {
@@ -100,6 +63,8 @@ pub struct ViSales {
     search: String,
     catalog_search: String,
     barcode: String,
+    product_category: String,
+    browse_category: Option<String>,
     name: String,
     cost: String,
     price: String,
@@ -157,6 +122,8 @@ impl ViSales {
             search: String::new(),
             catalog_search: String::new(),
             barcode: String::new(),
+            product_category: String::new(),
+            browse_category: None,
             name: String::new(),
             cost: String::new(),
             price: String::new(),
@@ -478,6 +445,7 @@ impl ViSales {
             ui.horizontal_wrapped(|ui| {
                 field(ui, &mut self.barcode, "Штрихкод");
                 field(ui, &mut self.name, "Назва товару");
+                field(ui, &mut self.product_category, "Категорія");
                 field(ui, &mut self.cost, "Собівартість, грн");
                 field(ui, &mut self.price, "Ціна продажу, грн");
                 if ui.button("Зберегти товар").clicked() {
@@ -487,6 +455,7 @@ impl ViSales {
                             stock: 0,
                             barcode: self.barcode.clone(),
                             name: self.name.clone(),
+                            category: Some(self.product_category.clone()),
                             cost: parse_money(&self.cost)?,
                             price: parse_money(&self.price)?,
                         };
@@ -539,6 +508,7 @@ impl ViSales {
         if let Some(product) = selected {
             self.barcode = product.barcode;
             self.name = product.name;
+            self.product_category = product.category.unwrap_or_default();
             self.cost = decimal(product.cost);
             self.price = decimal(product.price);
         }
@@ -1006,11 +976,7 @@ impl eframe::App for ViSales {
             }
             ui.label(
                 RichText::new("ТЕСТОВИЙ РЕЖИМ  ·  ОФЛАЙН  ·  UAH")
-                    .color(if self.dark {
-                        ACCENT
-                    } else {
-                        Color32::from_rgb(36, 79, 142)
-                    })
+                    .color(if self.dark { ACCENT } else { theme::BLACK })
                     .strong(),
             );
             ui.label(RichText::new(PAGES[self.page]).size(30.).strong());
