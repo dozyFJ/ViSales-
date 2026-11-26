@@ -24,8 +24,6 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
-    env:
-      CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: "-C link-arg=-Wl,-z,max-page-size=16384"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

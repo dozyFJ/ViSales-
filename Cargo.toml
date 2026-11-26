@@ -33,3 +33,4 @@ target_sdk_version = 34
 
 [package.metadata.android.application]
 label = "ViSales"
+extract_native_libs = true
