@@ -1,5 +1,6 @@
 mod admin;
 mod mobile;
+mod payment;
 mod portrait_pos;
 mod sale_details;
 
@@ -73,6 +74,7 @@ pub struct ViSales {
     sales: Vec<Sale>,
     cart: BTreeMap<i64, (i64, i64)>,
     customer: Option<i64>,
+    payment_form: Option<payment::Form>,
     customers: Vec<(i64, String)>,
     customer_name: String,
     parked_cart: Option<crate::store::ParkedRef>,
@@ -125,6 +127,7 @@ impl ViSales {
             sales: Vec::new(),
             cart: BTreeMap::new(),
             customer: None,
+            payment_form: None,
             customers: Vec::new(),
             customer_name: String::new(),
             parked_cart: None,
@@ -355,7 +358,7 @@ impl ViSales {
                 )
                 .clicked()
             {
-                self.checkout();
+                self.open_payment();
             }
         });
     }
@@ -422,12 +425,18 @@ impl ViSales {
         }
     }
 
-    fn checkout(&mut self) {
+    fn open_payment(&mut self) {
+        self.notice = None;
+        self.payment_form = Some(payment::Form::default());
+    }
+
+    fn checkout(&mut self, payment: crate::store::Payment) {
         let result = (|| {
             let id = self.store.as_mut().context("Сховище недоступне")?.sell(
                 &self.cart,
                 self.customer,
                 self.parked_cart,
+                payment,
             )?;
             self.cart.clear();
             self.customer = None;
@@ -702,6 +711,7 @@ impl ViSales {
                 "Сума",
                 "Прибуток",
                 "Клієнт",
+                "Оплата",
                 "Статус / дія",
             ],
             self.sales.len(),
@@ -722,6 +732,13 @@ impl ViSales {
                     }
                     4 => {
                         ui.label(s.customer.as_deref().unwrap_or("—"));
+                    }
+                    5 => {
+                        let text = s
+                            .payment
+                            .as_ref()
+                            .map_or_else(|| "—".into(), payment::label);
+                        ui.label(&text).on_hover_text(text);
                     }
                     _ if s.returned.is_some() => {
                         ui.label("Повернено");
@@ -927,6 +944,7 @@ impl eframe::App for ViSales {
         let portrait = screen.width() < screen.height();
         if portrait {
             portrait_pos::show(self, ctx);
+            payment::show(self, ctx);
             return;
         }
         let mobile_layout = cfg!(target_os = "android") || portrait || screen.width() < 840.;
@@ -969,6 +987,7 @@ impl eframe::App for ViSales {
                     self.render_page(ui);
                 });
         });
+        payment::show(self, ctx);
     }
 }
 

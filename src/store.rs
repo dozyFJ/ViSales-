@@ -30,6 +30,62 @@ pub struct ParkedCart {
     pub saved_at: String,
 }
 
+#[derive(Clone, Copy, Default)]
+pub enum Tender {
+    #[default]
+    Cash,
+    Card,
+    Split {
+        cash: i64,
+    },
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct Payment {
+    pub tender: Tender,
+    pub redeemed: i64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct PaymentBreakdown {
+    pub cash: i64,
+    pub card: i64,
+    pub redeemed: i64,
+    pub earned: i64,
+}
+
+impl Payment {
+    pub fn quote(self, gross: i64, balance: i64, has_customer: bool) -> Result<PaymentBreakdown> {
+        ensure!(
+            self.redeemed >= 0 && self.redeemed <= gross,
+            "Бонуси перевищують суму кошика"
+        );
+        ensure!(
+            self.redeemed == 0 || (has_customer && self.redeemed <= balance),
+            "Недостатньо бонусів"
+        );
+        let due = gross - self.redeemed;
+        let (cash, card) = match self.tender {
+            Tender::Cash => (due, 0),
+            Tender::Card => (0, due),
+            Tender::Split { cash } => {
+                ensure!(
+                    cash > 0 && cash < due,
+                    "Для змішаної оплати вкажіть готівку менше суми до сплати"
+                );
+                (cash, due - cash)
+            }
+        };
+        let earned = if has_customer { due / 100 } else { 0 };
+        Ok(PaymentBreakdown {
+            cash,
+            card,
+            redeemed: self.redeemed,
+            earned,
+        })
+    }
+}
+
 pub struct Sale {
     pub id: i64,
     pub created: String,
@@ -37,6 +93,7 @@ pub struct Sale {
     pub customer: Option<String>,
     pub total: i64,
     pub margin: i64,
+    pub payment: Option<PaymentBreakdown>,
 }
 
 pub fn money(value: i64) -> String {
@@ -410,14 +467,32 @@ impl Store {
         Ok(((id, revision), customer, cart))
     }
 
+    pub fn customer_bonus(&self, customer: i64) -> Result<i64> {
+        customer_bonus(&self.0, customer)
+    }
+
     pub fn sell(
         &mut self,
         cart: &Cart,
         customer: Option<i64>,
         parked: Option<ParkedRef>,
+        payment: Payment,
     ) -> Result<i64> {
         ensure!(!cart.is_empty(), "Кошик порожній");
         let tx = self.0.transaction_with_behavior(Immediate)?;
+        let gross = cart
+            .values()
+            .try_fold(0_i64, |sum, &(quantity, price)| {
+                quantity
+                    .checked_mul(price)
+                    .and_then(|amount| sum.checked_add(amount))
+            })
+            .context("Сума кошика завелика")?;
+        let balance = customer
+            .map(|id| customer_bonus(&tx, id))
+            .transpose()?
+            .unwrap_or_default();
+        let breakdown = payment.quote(gross, balance, customer.is_some())?;
         tx.execute("INSERT INTO sale DEFAULT VALUES", [])?;
         let id = tx.last_insert_rowid();
         for (&product, &(quantity, expected_price)) in cart {
@@ -447,6 +522,16 @@ impl Store {
                 "Відкладений кошик уже змінено або завершено"
             );
         }
+        tx.execute(
+            "INSERT INTO sale_payment(sale,cash,card,redeemed,earned) VALUES(?1,?2,?3,?4,?5)",
+            params![
+                id,
+                breakdown.cash,
+                breakdown.card,
+                breakdown.redeemed,
+                breakdown.earned
+            ],
+        )?;
         tx.commit()?;
         Ok(id)
     }
@@ -473,13 +558,26 @@ impl Store {
 
     pub fn sales(&self) -> Result<Vec<Sale>> {
         let mut q = self.0.prepare(
-            "SELECT sale.id,created,returned_at,SUM(quantity*unit_price),SUM(quantity*(unit_price-unit_cost)),customer.name
+            "SELECT sale.id,created,returned_at,SUM(quantity*unit_price)-COALESCE(p.redeemed,0),
+                    SUM(quantity*(unit_price-unit_cost))-COALESCE(p.redeemed,0),customer.name,
+                    p.cash,p.card,p.redeemed,p.earned
              FROM sale JOIN sale_line ON sale.id=sale_line.sale
              LEFT JOIN sale_customer ON sale_customer.sale=sale.id
              LEFT JOIN customer ON customer.id=sale_customer.customer
-             GROUP BY sale.id ORDER BY sale.id DESC"
+             LEFT JOIN sale_payment p ON p.sale=sale.id
+             GROUP BY sale.id ORDER BY sale.id DESC",
         )?;
         Ok(q.query_map([], |r| {
+            let payment = if let Some(cash) = r.get::<_, Option<i64>>(6)? {
+                Some(PaymentBreakdown {
+                    cash,
+                    card: r.get(7)?,
+                    redeemed: r.get(8)?,
+                    earned: r.get(9)?,
+                })
+            } else {
+                None
+            };
             Ok(Sale {
                 id: r.get(0)?,
                 created: r.get(1)?,
@@ -487,15 +585,62 @@ impl Store {
                 total: r.get(3)?,
                 margin: r.get(4)?,
                 customer: r.get(5)?,
+                payment,
             })
         })?
         .collect::<rusqlite::Result<_>>()?)
     }
 }
 
+fn customer_bonus(conn: &Connection, id: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(p.earned-p.redeemed),0)
+         FROM sale_customer c JOIN sale s ON s.id=c.sale
+         JOIN sale_payment p ON p.sale=s.id WHERE c.customer=?1 AND s.returned_at IS NULL",
+        [id],
+        |row| row.get(0),
+    )?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_tender_and_bonus_are_committed_and_reversed_with_sale() -> Result<()> {
+        let mut store = Store::open(Path::new(":memory:"))?;
+        store.add_demo_products()?;
+        let p = store.products()?.remove(0);
+        let customer = store.create_customer("Олена")?;
+        let cart = Cart::from([(p.id, (1, p.price))]);
+        let first = store.sell(&cart, Some(customer), None, Payment::default())?;
+        let balance = p.price / 100;
+        assert_eq!(store.customer_bonus(customer)?, balance);
+        let mixed = Payment {
+            tender: Tender::Split { cash: 1 },
+            redeemed: balance,
+        };
+        assert!(store.sell(&cart, None, None, mixed).is_err());
+        let second = store.sell(&cart, Some(customer), None, mixed)?;
+        let sales = store.sales()?;
+        let due = p.price - balance;
+        assert_eq!(sales[0].total, due);
+        assert_eq!(
+            sales[0].payment,
+            Some(PaymentBreakdown {
+                cash: 1,
+                card: due - 1,
+                redeemed: balance,
+                earned: due / 100
+            })
+        );
+        assert_eq!(store.customer_bonus(customer)?, due / 100);
+        store.refund(second)?;
+        assert_eq!(store.customer_bonus(customer)?, balance);
+        store.refund(first)?;
+        assert_eq!(store.customer_bonus(customer)?, 0);
+        Ok(())
+    }
 
     #[test]
     fn parked_cart_keeps_customer_and_stock_until_sale() -> Result<()> {
@@ -510,10 +655,14 @@ mod tests {
         assert_eq!(selected, Some(customer));
         assert_eq!(restored, cart);
         assert_eq!(store.park_cart(&cart, selected, Some(first))?, id);
-        assert!(store.sell(&cart, selected, Some(first)).is_err());
+        assert!(
+            store
+                .sell(&cart, selected, Some(first), Payment::default())
+                .is_err()
+        );
         assert_eq!(store.products()?[0].stock, product.stock);
         let (current, _, _) = store.load_parked_cart(id)?;
-        store.sell(&cart, selected, Some(current))?;
+        store.sell(&cart, selected, Some(current), Payment::default())?;
         assert_eq!(store.sales()?[0].customer.as_deref(), Some("Олена"));
         assert_eq!(store.products()?[0].stock, product.stock - 2);
         assert!(store.parked_carts()?.is_empty());
@@ -577,12 +726,16 @@ mod tests {
         store.receive(supplier, "Н-01", coffee.id, 4, 4500)?;
         assert!(store.receive(supplier, "Н-01", coffee.id, 4, 4500).is_err());
         let invalid = BTreeMap::from([(coffee.id, (2, 7200)), (tea.id, (1, 3300))]);
-        assert!(store.sell(&invalid, None, None).is_err());
+        assert!(
+            store
+                .sell(&invalid, None, None, Payment::default())
+                .is_err()
+        );
         assert!(store.sales()?.is_empty());
         assert_eq!(store.products()?[0].stock, 4);
 
         store.count(tea.id, 1)?;
-        let id = store.sell(&invalid, None, None)?;
+        let id = store.sell(&invalid, None, None, Payment::default())?;
         let sales = store.sales()?;
         assert_eq!((sales[0].total, sales[0].margin), (17700, 6700));
         assert_eq!(store.products()?[0].stock, 2);

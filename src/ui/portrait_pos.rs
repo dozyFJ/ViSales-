@@ -115,7 +115,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                             .add_enabled(!app.cart.is_empty() && app.store.is_some(), checkout)
                             .clicked()
                         {
-                            app.checkout();
+                            app.open_payment();
                         }
                     });
                 });

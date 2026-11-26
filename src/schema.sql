@@ -79,3 +79,11 @@ CREATE TABLE IF NOT EXISTS parked_line (
   price INTEGER NOT NULL CHECK(price >= 0),
   PRIMARY KEY(cart, product)
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS sale_payment (
+  sale INTEGER PRIMARY KEY REFERENCES sale(id),
+  cash INTEGER NOT NULL CHECK(cash >= 0),
+  card INTEGER NOT NULL CHECK(card >= 0),
+  redeemed INTEGER NOT NULL CHECK(redeemed >= 0),
+  earned INTEGER NOT NULL CHECK(earned >= 0)
+) STRICT;
