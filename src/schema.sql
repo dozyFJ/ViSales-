@@ -1,0 +1,51 @@
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+
+CREATE TABLE IF NOT EXISTS product (
+  id INTEGER PRIMARY KEY,
+  barcode TEXT NOT NULL UNIQUE CHECK(length(barcode) > 0),
+  name TEXT NOT NULL CHECK(length(name) > 0),
+  cost INTEGER NOT NULL CHECK(cost BETWEEN 0 AND 100000000),
+  price INTEGER NOT NULL CHECK(price BETWEEN 0 AND 100000000),
+  stock INTEGER NOT NULL DEFAULT 0 CHECK(stock BETWEEN 0 AND 1000000)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS supplier (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE CHECK(length(name) > 0)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS delivery (
+  id INTEGER PRIMARY KEY,
+  supplier INTEGER NOT NULL REFERENCES supplier(id),
+  reference TEXT NOT NULL,
+  product INTEGER NOT NULL REFERENCES product(id),
+  quantity INTEGER NOT NULL CHECK(quantity > 0),
+  unit_cost INTEGER NOT NULL CHECK(unit_cost BETWEEN 0 AND 100000000),
+  created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(supplier, reference, product)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS stock_count (
+  id INTEGER PRIMARY KEY,
+  product INTEGER NOT NULL REFERENCES product(id),
+  previous INTEGER NOT NULL,
+  counted INTEGER NOT NULL,
+  created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS sale (
+  id INTEGER PRIMARY KEY,
+  created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  returned_at TEXT
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS sale_line (
+  sale INTEGER NOT NULL REFERENCES sale(id),
+  product INTEGER NOT NULL REFERENCES product(id),
+  name TEXT NOT NULL,
+  quantity INTEGER NOT NULL CHECK(quantity > 0),
+  unit_price INTEGER NOT NULL,
+  unit_cost INTEGER NOT NULL,
+  PRIMARY KEY(sale, product)
+) STRICT;

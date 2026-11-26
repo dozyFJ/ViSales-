@@ -1,0 +1,35 @@
+[package]
+name = "visales"
+version = "0.1.0"
+edition = "2024"
+default-run = "visales"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "wgpu"] }
+egui_extras = "0.31.1"
+rusqlite = { version = "0.34", features = ["bundled"] }
+anyhow = "1"
+calamine = "0.38"
+rust_xlsxwriter = "0.104"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+eframe = { version = "0.31.1", default-features = false, features = ["x11", "wayland"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+eframe = { version = "0.31.1", default-features = false, features = ["android-native-activity"] }
+winit = { version = "0.30", features = ["android-native-activity"] }
+
+[package.metadata.android]
+package = "ua.visales.app"
+build_targets = ["aarch64-linux-android"]
+apk_name = "ViSales"
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "ViSales"
