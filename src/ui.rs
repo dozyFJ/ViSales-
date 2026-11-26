@@ -1,6 +1,7 @@
 mod admin;
 mod mobile;
 mod portrait_pos;
+mod sale_details;
 
 use crate::{
     exchange,
@@ -71,6 +72,11 @@ pub struct ViSales {
     products: Vec<Product>,
     sales: Vec<Sale>,
     cart: BTreeMap<i64, (i64, i64)>,
+    customer: Option<i64>,
+    customers: Vec<(i64, String)>,
+    customer_name: String,
+    parked_cart: Option<crate::store::ParkedRef>,
+    desktop_sale_panel: Option<sale_details::Panel>,
     pos_tab: usize,
     scanned_row: Option<(i64, f64)>,
     scroll_to_scan: Option<i64>,
@@ -118,6 +124,11 @@ impl ViSales {
             products: Vec::new(),
             sales: Vec::new(),
             cart: BTreeMap::new(),
+            customer: None,
+            customers: Vec::new(),
+            customer_name: String::new(),
+            parked_cart: None,
+            desktop_sale_panel: None,
             pos_tab: 0,
             scanned_row: None,
             scroll_to_scan: None,
@@ -168,8 +179,10 @@ impl ViSales {
         let store = self.store()?;
         let products = store.products()?;
         let sales = store.sales()?;
+        let customers = store.customers()?;
         self.products = products;
         self.sales = sales;
+        self.customers = customers;
         Ok(())
     }
 
@@ -241,6 +254,27 @@ impl ViSales {
     }
 
     fn pos(&mut self, ui: &mut Ui) {
+        ui.horizontal_wrapped(|ui| {
+            for (panel, label) in [
+                (sale_details::Panel::Customers, "Клієнти"),
+                (sale_details::Panel::Parked, "Відкладені"),
+            ] {
+                if ui
+                    .selectable_label(self.desktop_sale_panel == Some(panel), label)
+                    .clicked()
+                {
+                    self.desktop_sale_panel = if self.desktop_sale_panel == Some(panel) {
+                        None
+                    } else {
+                        Some(panel)
+                    };
+                }
+            }
+        });
+        if let Some(panel) = self.desktop_sale_panel {
+            sale_details::show(self, ui, panel);
+            return;
+        }
         #[cfg(target_os = "android")]
         if ui
             .add_enabled(!self.scanning, egui::Button::new("Сканер"))
@@ -309,6 +343,7 @@ impl ViSales {
     fn pos_cart(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
             ui.heading("Поточний продаж");
+            sale_details::cart_actions(self, ui);
             self.cart_lines(ui);
             ui.separator();
             let total = self.cart_total();
@@ -389,12 +424,14 @@ impl ViSales {
 
     fn checkout(&mut self) {
         let result = (|| {
-            let id = self
-                .store
-                .as_mut()
-                .context("Сховище недоступне")?
-                .sell(&self.cart)?;
+            let id = self.store.as_mut().context("Сховище недоступне")?.sell(
+                &self.cart,
+                self.customer,
+                self.parked_cart,
+            )?;
             self.cart.clear();
+            self.customer = None;
+            self.parked_cart = None;
             self.refresh()?;
             Ok(format!("Тестовий продаж №{id} записано локально"))
         })();
@@ -659,7 +696,14 @@ impl ViSales {
         ui.heading("Журнал тестових продажів");
         table(
             ui,
-            &["№", "Дата UTC", "Сума", "Прибуток", "Статус / дія"],
+            &[
+                "№",
+                "Дата UTC",
+                "Сума",
+                "Прибуток",
+                "Клієнт",
+                "Статус / дія",
+            ],
             self.sales.len(),
             |ui, row, col| {
                 let s = &self.sales[row];
@@ -675,6 +719,9 @@ impl ViSales {
                     }
                     3 => {
                         ui.label(money(s.margin));
+                    }
+                    4 => {
+                        ui.label(s.customer.as_deref().unwrap_or("—"));
                     }
                     _ if s.returned.is_some() => {
                         ui.label("Повернено");

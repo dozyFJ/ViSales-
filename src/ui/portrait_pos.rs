@@ -8,6 +8,8 @@ pub(super) enum Search {
     Product,
     Barcode,
     Cart,
+    Customers,
+    Parked,
 }
 
 const ACCENTS: [Color32; 3] = [
@@ -144,6 +146,8 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                         for (mode, label) in [
                             (Search::Browse, "Вибрати товар"),
                             (Search::Cart, "Кошик"),
+                            (Search::Parked, "Відкладені"),
+                            (Search::Customers, "Клієнти"),
                             (Search::Product, "Пошук"),
                             (Search::Barcode, "Штрихкод"),
                         ] {
@@ -248,7 +252,17 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
             }
             if app.portrait_search == Search::Cart {
                 ui.heading("Кошик");
+                super::sale_details::cart_actions(app, ui);
                 sale_table(app, ui, &palette);
+                return;
+            }
+            let panel = match app.portrait_search {
+                Search::Customers => Some(super::sale_details::Panel::Customers),
+                Search::Parked => Some(super::sale_details::Panel::Parked),
+                _ => None,
+            };
+            if let Some(panel) = panel {
+                super::sale_details::show(app, ui, panel);
                 return;
             }
             if app.portrait_search == Search::Browse {

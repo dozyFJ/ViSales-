@@ -19,10 +19,22 @@ pub struct Product {
     pub stock: i64,
 }
 
+pub type Cart = BTreeMap<i64, (i64, i64)>;
+pub type ParkedRef = (i64, i64);
+
+pub struct ParkedCart {
+    pub id: i64,
+    pub customer: Option<i64>,
+    pub units: i64,
+    pub total: i64,
+    pub saved_at: String,
+}
+
 pub struct Sale {
     pub id: i64,
     pub created: String,
     pub returned: Option<String>,
+    pub customer: Option<String>,
     pub total: i64,
     pub margin: i64,
 }
@@ -303,7 +315,107 @@ impl Store {
         .collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn sell(&mut self, cart: &BTreeMap<i64, (i64, i64)>) -> Result<i64> {
+    pub fn customers(&self) -> Result<Vec<(i64, String)>> {
+        let mut statement = self
+            .0
+            .prepare("SELECT id,name FROM customer ORDER BY name COLLATE NOCASE,id")?;
+        Ok(statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn create_customer(&self, name: &str) -> Result<i64> {
+        let name = name.trim();
+        ensure!(
+            (1..=100).contains(&name.chars().count()),
+            "Вкажіть ім’я клієнта (до 100 символів)"
+        );
+        Ok(self.0.query_row(
+            "INSERT INTO customer(name) VALUES(?1) RETURNING id",
+            [name],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn parked_carts(&self) -> Result<Vec<ParkedCart>> {
+        let mut statement = self.0.prepare(
+            "SELECT pc.id,pc.customer,SUM(pl.quantity),SUM(pl.quantity*pl.price),pc.saved_at
+             FROM parked_cart pc JOIN parked_line pl ON pl.cart=pc.id
+             GROUP BY pc.id ORDER BY pc.saved_at DESC,pc.id DESC",
+        )?;
+        Ok(statement
+            .query_map([], |row| {
+                Ok(ParkedCart {
+                    id: row.get(0)?,
+                    customer: row.get(1)?,
+                    units: row.get(2)?,
+                    total: row.get(3)?,
+                    saved_at: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn park_cart(
+        &mut self,
+        cart: &Cart,
+        customer: Option<i64>,
+        parked: Option<ParkedRef>,
+    ) -> Result<i64> {
+        ensure!(!cart.is_empty(), "Кошик порожній");
+        let tx = self.0.transaction_with_behavior(Immediate)?;
+        let id = if let Some((id, revision)) = parked {
+            ensure!(tx.execute(
+                "UPDATE parked_cart SET revision=revision+1,customer=?3,saved_at=CURRENT_TIMESTAMP
+                 WHERE id=?1 AND revision=?2", params![id, revision, customer],
+            )? == 1, "Відкладений кошик уже змінено або завершено");
+            tx.execute("DELETE FROM parked_line WHERE cart=?1", [id])?;
+            id
+        } else {
+            tx.query_row(
+                "INSERT INTO parked_cart(customer) VALUES(?1) RETURNING id",
+                [customer],
+                |row| row.get(0),
+            )?
+        };
+        {
+            let mut insert = tx.prepare(
+                "INSERT INTO parked_line(cart,product,quantity,price) VALUES(?1,?2,?3,?4)",
+            )?;
+            for (&product, &(quantity, price)) in cart {
+                insert.execute(params![id, product, quantity, price])?;
+            }
+        }
+        tx.commit()?;
+        Ok(id)
+    }
+
+    pub fn load_parked_cart(&mut self, id: i64) -> Result<(ParkedRef, Option<i64>, Cart)> {
+        let tx = self.0.transaction()?;
+        let (revision, customer) = tx
+            .query_row(
+                "SELECT revision,customer FROM parked_cart WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .context("Відкладений кошик недоступний")?;
+        let cart = {
+            let mut query =
+                tx.prepare("SELECT product,quantity,price FROM parked_line WHERE cart=?1")?;
+            query
+                .query_map([id], |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))))?
+                .collect::<rusqlite::Result<Cart>>()?
+        };
+        tx.commit()?;
+        Ok(((id, revision), customer, cart))
+    }
+
+    pub fn sell(
+        &mut self,
+        cart: &Cart,
+        customer: Option<i64>,
+        parked: Option<ParkedRef>,
+    ) -> Result<i64> {
         ensure!(!cart.is_empty(), "Кошик порожній");
         let tx = self.0.transaction_with_behavior(Immediate)?;
         tx.execute("INSERT INTO sale DEFAULT VALUES", [])?;
@@ -319,6 +431,21 @@ impl Store {
                 "INSERT INTO sale_line SELECT ?1,id,name,?3,price,cost FROM product WHERE id=?2",
                 params![id, product, quantity],
             )?;
+        }
+        if let Some(customer) = customer {
+            tx.execute(
+                "INSERT INTO sale_customer(sale,customer) VALUES(?1,?2)",
+                params![id, customer],
+            )?;
+        }
+        if let Some((id, revision)) = parked {
+            ensure!(
+                tx.execute(
+                    "DELETE FROM parked_cart WHERE id=?1 AND revision=?2",
+                    params![id, revision]
+                )? == 1,
+                "Відкладений кошик уже змінено або завершено"
+            );
         }
         tx.commit()?;
         Ok(id)
@@ -346,8 +473,11 @@ impl Store {
 
     pub fn sales(&self) -> Result<Vec<Sale>> {
         let mut q = self.0.prepare(
-            "SELECT sale.id,created,returned_at,SUM(quantity*unit_price),SUM(quantity*(unit_price-unit_cost))
-             FROM sale JOIN sale_line ON sale.id=sale_line.sale GROUP BY sale.id ORDER BY sale.id DESC"
+            "SELECT sale.id,created,returned_at,SUM(quantity*unit_price),SUM(quantity*(unit_price-unit_cost)),customer.name
+             FROM sale JOIN sale_line ON sale.id=sale_line.sale
+             LEFT JOIN sale_customer ON sale_customer.sale=sale.id
+             LEFT JOIN customer ON customer.id=sale_customer.customer
+             GROUP BY sale.id ORDER BY sale.id DESC"
         )?;
         Ok(q.query_map([], |r| {
             Ok(Sale {
@@ -356,6 +486,7 @@ impl Store {
                 returned: r.get(2)?,
                 total: r.get(3)?,
                 margin: r.get(4)?,
+                customer: r.get(5)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?)
@@ -365,6 +496,29 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parked_cart_keeps_customer_and_stock_until_sale() -> Result<()> {
+        let mut store = Store::open(Path::new(":memory:"))?;
+        store.add_demo_products()?;
+        let product = store.products()?.remove(0);
+        let customer = store.create_customer("Олена")?;
+        let cart = Cart::from([(product.id, (2, product.price))]);
+        let id = store.park_cart(&cart, Some(customer), None)?;
+        assert_eq!(store.products()?[0].stock, product.stock);
+        let (first, selected, restored) = store.load_parked_cart(id)?;
+        assert_eq!(selected, Some(customer));
+        assert_eq!(restored, cart);
+        assert_eq!(store.park_cart(&cart, selected, Some(first))?, id);
+        assert!(store.sell(&cart, selected, Some(first)).is_err());
+        assert_eq!(store.products()?[0].stock, product.stock);
+        let (current, _, _) = store.load_parked_cart(id)?;
+        store.sell(&cart, selected, Some(current))?;
+        assert_eq!(store.sales()?[0].customer.as_deref(), Some("Олена"));
+        assert_eq!(store.products()?[0].stock, product.stock - 2);
+        assert!(store.parked_carts()?.is_empty());
+        Ok(())
+    }
 
     #[test]
     fn admin_pin_is_initialized_once_and_can_be_changed() -> Result<()> {
@@ -423,12 +577,12 @@ mod tests {
         store.receive(supplier, "Н-01", coffee.id, 4, 4500)?;
         assert!(store.receive(supplier, "Н-01", coffee.id, 4, 4500).is_err());
         let invalid = BTreeMap::from([(coffee.id, (2, 7200)), (tea.id, (1, 3300))]);
-        assert!(store.sell(&invalid).is_err());
+        assert!(store.sell(&invalid, None, None).is_err());
         assert!(store.sales()?.is_empty());
         assert_eq!(store.products()?[0].stock, 4);
 
         store.count(tea.id, 1)?;
-        let id = store.sell(&invalid)?;
+        let id = store.sell(&invalid, None, None)?;
         let sales = store.sales()?;
         assert_eq!((sales[0].total, sales[0].margin), (17700, 6700));
         assert_eq!(store.products()?[0].stock, 2);
