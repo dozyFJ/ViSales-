@@ -37,7 +37,7 @@ public final class ScannerActivity extends NativeActivity {
     private boolean recognized;
     private static final float GUIDE_WIDTH = 0.82f;
     private static final float GUIDE_HEIGHT = 0.28f;
-    private static final int PANEL = 0xff171919;
+    private static final int PANEL = 0xff1b181e;
     private static final int TEXT = 0xfff4f1e5;
     private String completedResult;
     private final Updater updater = new Updater(this);
@@ -110,7 +110,7 @@ public final class ScannerActivity extends NativeActivity {
         cancel.setTextColor(TEXT);
         cancel.setBackground(new android.graphics.drawable.RippleDrawable(
             android.content.res.ColorStateList.valueOf(0x32ffffff),
-            new ColorDrawable(0xff262929), null));
+            new ColorDrawable(0xff2a242f), null));
         cancel.setStateListAnimator(null);
         cancel.setOnClickListener(view -> scanner.dismiss());
         layout.addView(cancel, new LinearLayout.LayoutParams(-1, dp(52)));
@@ -219,7 +219,7 @@ public final class ScannerActivity extends NativeActivity {
             bounds.set(width * (1 - GUIDE_WIDTH) / 2, height * (1 - GUIDE_HEIGHT) / 2,
                 width * (1 + GUIDE_WIDTH) / 2, height * (1 + GUIDE_HEIGHT) / 2);
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0x900c1218);
+            paint.setColor(0x90141117);
             canvas.drawRect(0, 0, width, bounds.top, paint);
             canvas.drawRect(0, bounds.bottom, width, height, paint);
             canvas.drawRect(0, bounds.top, bounds.left, bounds.bottom, paint);

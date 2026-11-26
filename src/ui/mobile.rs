@@ -31,7 +31,6 @@ pub(super) fn shell(app: &mut ViSales, ctx: &egui::Context, bottom_tabs: bool) {
                     }
                 });
             });
-            theme::signal_stripe(ui);
         });
     if bottom_tabs {
         egui::TopBottomPanel::bottom("mobile-tabs")

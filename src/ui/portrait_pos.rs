@@ -18,7 +18,7 @@ pub(super) enum Search {
     Receipts,
 }
 
-const ACCENTS: [Color32; 3] = [theme::SIGNAL, theme::STEEL, theme::SIGNAL];
+const ACCENTS: [Color32; 3] = [theme::SIGNAL, theme::LILAC, theme::SIGNAL];
 
 pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
     let palette = Palette::new(app.dark);
@@ -27,7 +27,6 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
         .exact_height(75.)
         .frame(palette.panel(9, 6))
         .show(ctx, |ui| {
-            theme::signal_stripe(ui);
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(format!("ViSales · {}", PAGES[app.page]))
@@ -683,19 +682,6 @@ fn product_card(ui: &mut egui::Ui, palette: &Palette, product: &Product, size: e
         0.,
         Stroke::new(2.0_f32, palette.line),
         egui::StrokeKind::Inside,
-    );
-    let strip = egui::Rect::from_min_size(
-        rect.min + egui::vec2(2., 2.),
-        egui::vec2((rect.width() - 4.).max(0.), 3.),
-    );
-    painter.rect_filled(
-        strip,
-        0.,
-        if clickable {
-            theme::SIGNAL
-        } else {
-            theme::STEEL
-        },
     );
     let content = rect.shrink2(egui::vec2(8., 9.));
     let mut details = ui.new_child(

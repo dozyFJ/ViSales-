@@ -2,7 +2,7 @@ use eframe::egui::{self, Color32, Frame, Margin, Stroke};
 
 pub(super) const SIGNAL: Color32 = Color32::from_rgb(255, 215, 54);
 pub(super) const BLACK: Color32 = Color32::from_rgb(19, 20, 20);
-pub(super) const STEEL: Color32 = Color32::from_rgb(97, 105, 105);
+pub(super) const LILAC: Color32 = Color32::from_rgb(207, 183, 246);
 
 pub(super) struct Palette {
     pub grid: Color32,
@@ -16,16 +16,16 @@ impl Palette {
     pub(super) fn new(dark: bool) -> Self {
         if dark {
             Self {
-                grid: Color32::from_rgb(23, 25, 25),
-                rail: Color32::from_rgb(38, 41, 41),
-                line: Color32::from_rgb(122, 132, 130),
+                grid: Color32::from_rgb(27, 24, 30),
+                rail: Color32::from_rgb(42, 36, 47),
+                line: Color32::from_rgb(203, 190, 215),
                 ink: Color32::from_rgb(244, 241, 229),
                 action: SIGNAL,
             }
         } else {
             Self {
-                grid: Color32::from_rgb(239, 236, 222),
-                rail: Color32::from_rgb(250, 248, 235),
+                grid: Color32::from_rgb(243, 229, 215),
+                rail: Color32::from_rgb(255, 247, 232),
                 line: BLACK,
                 ink: BLACK,
                 action: SIGNAL,
@@ -99,27 +99,4 @@ pub(super) fn visuals(dark: bool) -> egui::Visuals {
     v.window_shadow = hard_shadow();
     v.popup_shadow = hard_shadow();
     v
-}
-
-pub(super) fn signal_stripe(ui: &mut egui::Ui) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 4.), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0., SIGNAL);
-    let mut x = rect.left();
-    while x < rect.right() {
-        let top = rect.top();
-        let bottom = rect.bottom();
-        painter.add(egui::Shape::convex_polygon(
-            vec![
-                egui::pos2(x, bottom),
-                egui::pos2(x + 5., bottom),
-                egui::pos2(x + 10., top),
-                egui::pos2(x + 5., top),
-            ],
-            BLACK,
-            Stroke::NONE,
-        ));
-        x += 14.;
-    }
 }
