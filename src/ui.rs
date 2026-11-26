@@ -872,13 +872,13 @@ impl ViSales {
 
     fn visible_pages(&self) -> impl Iterator<Item = usize> + use<> {
         let admin = self.access.unlocked;
-        (0..PAGES.len()).filter(move |&page| page == 0 || page == admin::PAGE || admin)
+        (0..PAGES.len()).filter(move |&page| page == 0 || admin)
     }
 
     fn navigate(&mut self, page: usize) {
         self.access.clear_fields();
         self.page = if page != 0 && !self.access.unlocked {
-            admin::PAGE
+            0
         } else {
             page
         };
@@ -888,7 +888,6 @@ impl ViSales {
     fn render_page(&mut self, ui: &mut Ui) {
         // Enforce role access at rendering as well as navigation.
         if self.page != 0 && !self.access.unlocked {
-            admin::show(self, ui);
             return;
         }
         match self.page {

@@ -1,6 +1,6 @@
 use super::{PAGES, ViSales, money};
 use anyhow::{Result, ensure};
-use eframe::egui::{Button, TextEdit, Ui};
+use eframe::egui::{TextEdit, Ui};
 
 pub(super) const PAGE: usize = 6;
 
@@ -10,7 +10,8 @@ pub(super) struct Access {
     pin: String,
     new_pin: String,
     confirmation: String,
-    retry_at: f64,
+    cashier_login: String,
+    cashier_password: String,
 }
 
 impl Access {
@@ -18,81 +19,14 @@ impl Access {
         self.pin.clear();
         self.new_pin.clear();
         self.confirmation.clear();
+        self.cashier_login.clear();
+        self.cashier_password.clear();
     }
 }
 
 pub(super) fn show(app: &mut ViSales, ui: &mut Ui) {
     if app.access.unlocked {
         dashboard(app, ui);
-        return;
-    }
-
-    let configured = match app.store().and_then(|store| store.has_admin_pin()) {
-        Ok(configured) => configured,
-        Err(error) => {
-            ui.label(error.to_string());
-            return;
-        }
-    };
-    ui.heading(if configured {
-        "Вхід адміністратора"
-    } else {
-        "Створення PIN адміністратора"
-    });
-    if !configured {
-        ui.label("Під час першого налаштування задайте PIN із 6–12 цифр.");
-    }
-    pin_input(ui, &mut app.access.pin, "PIN адміністратора");
-    if !configured {
-        pin_input(ui, &mut app.access.confirmation, "Повторіть PIN");
-    }
-    let now = ui.input(|input| input.time);
-    let waiting = now < app.access.retry_at;
-    if waiting {
-        ui.weak("Зачекайте перед наступною спробою.");
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_secs_f64(
-                app.access.retry_at - now,
-            ));
-    }
-    if ui
-        .add_enabled(
-            !waiting,
-            Button::new(if configured {
-                "Увійти"
-            } else {
-                "Зберегти й увійти"
-            }),
-        )
-        .clicked()
-    {
-        let result = (|| {
-            let store = app
-                .store
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("Сховище недоступне"))?;
-            if configured {
-                ensure!(store.verify_admin_pin(&app.access.pin)?, "Неправильний PIN");
-            } else {
-                ensure!(
-                    app.access.pin == app.access.confirmation,
-                    "PIN не збігаються"
-                );
-                store.set_initial_admin_pin(&app.access.pin)?;
-            }
-            Ok("Вхід адміністратора виконано".to_owned())
-        })();
-        app.access.pin.clear();
-        app.access.confirmation.clear();
-        if result.is_ok() {
-            app.access.unlocked = true;
-        } else if configured {
-            app.access.retry_at = now + 3.;
-        }
-        app.result(result);
-    }
-    if ui.button("Повернутися до каси").clicked() {
-        app.navigate(0);
     }
 }
 
@@ -112,6 +46,8 @@ fn dashboard(app: &mut ViSales, ui: &mut Ui) {
         }
     });
     ui.separator();
+    cashier_accounts(app, ui);
+    ui.separator();
     ui.collapsing("Змінити PIN адміністратора", |ui| {
         pin_input(ui, &mut app.access.pin, "Поточний PIN");
         pin_input(ui, &mut app.access.new_pin, "Новий PIN");
@@ -124,10 +60,50 @@ fn dashboard(app: &mut ViSales, ui: &mut Ui) {
             app.result(result);
         }
     });
-    if ui.button("Вийти з режиму адміністратора").clicked() {
-        app.access = Access::default();
-        app.refund = None;
-        app.navigate(0);
+    if ui.button("Вийти з облікового запису").clicked() {
+        app.lock_screen();
+    }
+}
+
+fn cashier_accounts(app: &mut ViSales, ui: &mut Ui) {
+    ui.heading("Касири");
+    ui.label("Логін касира");
+    ui.add(TextEdit::singleline(&mut app.access.cashier_login).char_limit(48));
+    ui.label("Пароль касира");
+    ui.add(
+        TextEdit::singleline(&mut app.access.cashier_password)
+            .password(true)
+            .char_limit(128),
+    );
+    if ui.button("Додати касира").clicked() {
+        let result = (|| {
+            ensure!(app.access.unlocked, "Потрібні права адміністратора");
+            let store = app
+                .store
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Сховище недоступне"))?;
+            store.create_cashier(&app.access.cashier_login, &app.access.cashier_password)?;
+            Ok(format!("Касира {} додано", app.access.cashier_login.trim()))
+        })();
+        app.access.cashier_password.clear();
+        if result.is_ok() {
+            app.access.cashier_login.clear();
+        }
+        app.result(result);
+    }
+
+    match app.store().and_then(|store| store.cashier_logins()) {
+        Ok(logins) if logins.is_empty() => {
+            ui.weak("Касирів ще немає.");
+        }
+        Ok(logins) => {
+            for login in logins {
+                ui.label(login);
+            }
+        }
+        Err(error) => {
+            ui.label(error.to_string());
+        }
     }
 }
 

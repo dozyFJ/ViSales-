@@ -93,3 +93,11 @@ CREATE TABLE IF NOT EXISTS cashier_access (
   login TEXT NOT NULL CHECK(length(login) BETWEEN 3 AND 48),
   password_hash TEXT NOT NULL
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS cashier_profile (
+  login TEXT PRIMARY KEY CHECK(length(login) BETWEEN 3 AND 48),
+  password_hash TEXT NOT NULL
+) STRICT;
+
+INSERT OR IGNORE INTO cashier_profile(login,password_hash)
+SELECT login,password_hash FROM cashier_access;

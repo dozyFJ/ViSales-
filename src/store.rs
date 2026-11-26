@@ -167,9 +167,18 @@ impl Store {
     pub fn has_cashier_account(&self) -> Result<bool> {
         Ok(self
             .0
-            .query_row("SELECT EXISTS(SELECT 1 FROM cashier_access)", [], |row| {
+            .query_row("SELECT EXISTS(SELECT 1 FROM cashier_profile)", [], |row| {
                 row.get(0)
             })?)
+    }
+
+    pub fn cashier_logins(&self) -> Result<Vec<String>> {
+        let mut query = self
+            .0
+            .prepare("SELECT login FROM cashier_profile ORDER BY login")?;
+        Ok(query
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn create_cashier(&self, login: &str, password: &str) -> Result<()> {
@@ -188,9 +197,9 @@ impl Store {
         );
         let hash = hash_secret(password)?;
         ensure!(self.0.execute(
-            "INSERT INTO cashier_access(id,login,password_hash) VALUES(1,?1,?2) ON CONFLICT(id) DO NOTHING",
+            "INSERT INTO cashier_profile(login,password_hash) VALUES(?1,?2) ON CONFLICT(login) DO NOTHING",
             params![login, hash],
-        )? == 1, "Обліковий запис касира вже створено");
+        )? == 1, "Касир із таким логіном уже існує");
         Ok(())
     }
 
@@ -199,7 +208,7 @@ impl Store {
         let stored: Option<String> = self
             .0
             .query_row(
-                "SELECT password_hash FROM cashier_access WHERE id=1 AND login=?1",
+                "SELECT password_hash FROM cashier_profile WHERE login=?1",
                 [login.trim().to_lowercase()],
                 |row| row.get(0),
             )
@@ -678,17 +687,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cashier_credentials_are_created_once_and_verified() -> Result<()> {
+    fn old_single_cashier_is_migrated_with_its_password() -> Result<()> {
+        let path =
+            std::env::temp_dir().join(format!("visales-legacy-cashier-{}.db", std::process::id()));
+        let conn = Connection::open(&path)?;
+        conn.execute_batch(
+            "CREATE TABLE cashier_access (id INTEGER PRIMARY KEY, login TEXT NOT NULL, password_hash TEXT NOT NULL)",
+        )?;
+        conn.execute(
+            "INSERT INTO cashier_access VALUES(1,?1,?2)",
+            params!["old", hash_secret("legacy123")?],
+        )?;
+        drop(conn);
+        let store = Store::open(&path)?;
+        assert!(store.verify_cashier("old", "legacy123")?);
+        assert_eq!(store.cashier_logins()?, vec!["old"]);
+        drop(store);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn cashier_credentials_support_individual_logins() -> Result<()> {
         let store = Store::open(Path::new(":memory:"))?;
         assert!(!store.has_cashier_account()?);
         assert!(store.create_cashier("admin", "password123").is_err());
         assert!(store.create_cashier("ostal", "short").is_err());
         store.create_cashier("Касир", "password123")?;
         assert!(store.has_cashier_account()?);
-        assert!(store.create_cashier("other", "password456").is_err());
+        store.create_cashier("other", "password456")?;
+        assert!(store.create_cashier("КАСИР", "different123").is_err());
+        assert_eq!(store.cashier_logins()?, vec!["other", "касир"]);
         assert!(store.verify_cashier("касир", "password123")?);
         assert!(!store.verify_cashier("касир", "password456")?);
         assert!(!store.verify_cashier("other", "password123")?);
+        assert!(store.verify_cashier("other", "password456")?);
         Ok(())
     }
 

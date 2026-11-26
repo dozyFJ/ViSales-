@@ -190,43 +190,36 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 }
 
                 ui.separator();
-                if rail_button(
-                    ui,
-                    &palette,
-                    group_label("Склад", app.stock_menu_open && app.access.unlocked),
-                    app.access.unlocked && (1..=3).contains(&app.page),
-                ) {
-                    if app.access.unlocked {
-                        app.stock_menu_open = !app.stock_menu_open;
-                    } else {
-                        app.navigate(admin::PAGE);
-                    }
-                }
-                if app.stock_menu_open && app.access.unlocked {
-                    ui.indent("stock-actions", |ui| {
-                        for index in 1..=3 {
-                            let label = if index == 2 {
-                                "Залишки"
-                            } else {
-                                PAGES[index]
-                            };
-                            if rail_button(ui, &palette, label, app.page == index) {
-                                app.navigate(index);
-                            }
-                        }
-                    });
-                }
                 if app.access.unlocked {
-                    for index in [4, 5] {
+                    if rail_button(
+                        ui,
+                        &palette,
+                        group_label("Склад", app.stock_menu_open),
+                        (1..=3).contains(&app.page),
+                    ) {
+                        app.stock_menu_open = !app.stock_menu_open;
+                    }
+                    if app.stock_menu_open {
+                        ui.indent("stock-actions", |ui| {
+                            for index in 1..=3 {
+                                let label = if index == 2 {
+                                    "Залишки"
+                                } else {
+                                    PAGES[index]
+                                };
+                                if rail_button(ui, &palette, label, app.page == index) {
+                                    app.navigate(index);
+                                }
+                            }
+                        });
+                    }
+                    for index in [4, 5, admin::PAGE] {
                         if rail_button(ui, &palette, PAGES[index], app.page == index) {
                             app.navigate(index);
                         }
                     }
+                    ui.separator();
                 }
-                if rail_button(ui, &palette, "Адмінка", app.page == admin::PAGE) {
-                    app.navigate(admin::PAGE);
-                }
-                ui.separator();
                 #[cfg(target_os = "android")]
                 if rail_button(ui, &palette, "Оновлення", false) {
                     app.check_updates();
@@ -666,7 +659,7 @@ mod tests {
             (3, "Постачальники"),
             (4, "Виторг"),
             (5, "Обмін Excel"),
-            (6, "Змінити PIN адміністратора"),
+            (6, "Касири"),
         ] {
             app.navigate(page);
             let _ = frame(&mut app);
@@ -817,11 +810,8 @@ mod tests {
         add_quick_product(&mut app);
         assert_eq!(app.cart_total(), 6900);
         app.navigate(2);
-        assert_eq!(app.page, admin::PAGE);
-        assert_eq!(
-            app.visible_pages().collect::<Vec<_>>(),
-            vec![0, admin::PAGE]
-        );
+        assert_eq!(app.page, 0);
+        assert_eq!(app.visible_pages().collect::<Vec<_>>(), vec![0]);
         app.navigate(0);
         app.receive_scan("123", 1.0);
         assert!(app.portrait_search == Search::Cart);
