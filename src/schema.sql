@@ -87,3 +87,9 @@ CREATE TABLE IF NOT EXISTS sale_payment (
   redeemed INTEGER NOT NULL CHECK(redeemed >= 0),
   earned INTEGER NOT NULL CHECK(earned >= 0)
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS cashier_access (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  login TEXT NOT NULL CHECK(length(login) BETWEEN 3 AND 48),
+  password_hash TEXT NOT NULL
+) STRICT;

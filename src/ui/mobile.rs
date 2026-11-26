@@ -16,6 +16,9 @@ pub(super) fn shell(app: &mut ViSales, ctx: &egui::Context, bottom_tabs: bool) {
                         .strong()
                         .color(accent(app.dark)),
                 );
+                if ui.small_button("Заблокувати").clicked() {
+                    app.lock_screen();
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let label = if app.dark {
                         "Світла тема"

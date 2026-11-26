@@ -1,4 +1,5 @@
 mod admin;
+mod login;
 mod mobile;
 mod payment;
 mod portrait_pos;
@@ -90,6 +91,7 @@ pub struct ViSales {
     portrait_search: portrait_pos::Search,
     page: usize,
     access: admin::Access,
+    login: login::Login,
     cash_menu_open: bool,
     stock_menu_open: bool,
     dark: bool,
@@ -144,6 +146,7 @@ impl ViSales {
             portrait_search: portrait_pos::Search::Browse,
             page: 0,
             access: admin::Access::default(),
+            login: login::Login::default(),
             cash_menu_open: true,
             stock_menu_open: false,
             dark: true,
@@ -899,7 +902,18 @@ impl ViSales {
         }
     }
 
+    fn lock_screen(&mut self) {
+        self.login = login::Login::default();
+        self.access = admin::Access::default();
+        self.payment_form = None;
+        self.refund = None;
+        self.navigate(0);
+    }
+
     fn desktop_nav(&mut self, ui: &mut Ui) {
+        if ui.small_button("Заблокувати").clicked() {
+            self.lock_screen();
+        }
         ui.label(RichText::new("ViSales").size(28.).strong());
         ui.add_space(10.);
         for index in self.visible_pages() {
@@ -946,6 +960,10 @@ impl eframe::App for ViSales {
         if mobile::startup_splash(ctx, self.splash_started.elapsed().as_secs_f32()) {
             return;
         }
+        if !self.login.authenticated {
+            login::show(self, ctx);
+            return;
+        }
         let screen = ctx.screen_rect();
         let portrait = screen.width() < screen.height();
         #[cfg(target_os = "android")]
@@ -960,7 +978,9 @@ impl eframe::App for ViSales {
         };
         if portrait {
             portrait_pos::show(self, ctx);
-            payment::show(self, ctx);
+            if self.login.authenticated {
+                payment::show(self, ctx);
+            }
             return;
         }
         let mobile_layout = cfg!(target_os = "android") || portrait || screen.width() < 840.;
@@ -971,6 +991,9 @@ impl eframe::App for ViSales {
                 .resizable(false)
                 .exact_width(173.)
                 .show(ctx, |ui| self.desktop_nav(ui));
+        }
+        if !self.login.authenticated {
+            return;
         }
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(10., 9.);

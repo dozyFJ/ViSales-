@@ -137,16 +137,20 @@ fn valid_pin(pin: &str) -> bool {
 
 fn hash_pin(pin: &str) -> Result<String> {
     ensure!(valid_pin(pin), "PIN має містити від 6 до 12 цифр");
+    hash_secret(pin)
+}
+
+fn hash_secret(pin: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(pin.as_bytes(), &salt)
         .map(|hash| hash.to_string())
-        .map_err(|error| anyhow::anyhow!("Не вдалося зберегти PIN: {error}"))
+        .map_err(|error| anyhow::anyhow!("Не вдалося зберегти облікові дані: {error}"))
 }
 
-fn matches_pin(pin: &str, stored: &str) -> Result<bool> {
-    let hash =
-        PasswordHash::new(stored).map_err(|error| anyhow::anyhow!("Пошкоджений PIN: {error}"))?;
+fn matches_secret(pin: &str, stored: &str) -> Result<bool> {
+    let hash = PasswordHash::new(stored)
+        .map_err(|error| anyhow::anyhow!("Пошкоджені облікові дані: {error}"))?;
     Ok(Argon2::default()
         .verify_password(pin.as_bytes(), &hash)
         .is_ok())
@@ -158,6 +162,52 @@ impl Store {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch(include_str!("schema.sql"))?;
         Ok(Self(conn))
+    }
+
+    pub fn has_cashier_account(&self) -> Result<bool> {
+        Ok(self
+            .0
+            .query_row("SELECT EXISTS(SELECT 1 FROM cashier_access)", [], |row| {
+                row.get(0)
+            })?)
+    }
+
+    pub fn create_cashier(&self, login: &str, password: &str) -> Result<()> {
+        let login = login.trim().to_lowercase();
+        ensure!(
+            (3..=48).contains(&login.chars().count())
+                && login != "admin"
+                && login
+                    .chars()
+                    .all(|ch| ch.is_alphanumeric() || matches!(ch, '-' | '_' | '.')),
+            "Логін має містити 3–48 літер, цифр, крапок, дефісів або підкреслень. Логін admin зарезервовано."
+        );
+        ensure!(
+            (8..=128).contains(&password.chars().count()),
+            "Пароль має містити 8–128 символів"
+        );
+        let hash = hash_secret(password)?;
+        ensure!(self.0.execute(
+            "INSERT INTO cashier_access(id,login,password_hash) VALUES(1,?1,?2) ON CONFLICT(id) DO NOTHING",
+            params![login, hash],
+        )? == 1, "Обліковий запис касира вже створено");
+        Ok(())
+    }
+
+    pub fn verify_cashier(&self, login: &str, password: &str) -> Result<bool> {
+        use rusqlite::OptionalExtension;
+        let stored: Option<String> = self
+            .0
+            .query_row(
+                "SELECT password_hash FROM cashier_access WHERE id=1 AND login=?1",
+                [login.trim().to_lowercase()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match stored {
+            Some(stored) => matches_secret(password, &stored),
+            None => Ok(false),
+        }
     }
 
     pub fn has_admin_pin(&self) -> Result<bool> {
@@ -189,7 +239,7 @@ impl Store {
                 .query_row("SELECT pin_hash FROM admin_access WHERE id=1", [], |row| {
                     row.get(0)
                 })?;
-        Ok(matches_pin(pin, &stored)?)
+        Ok(matches_secret(pin, &stored)?)
     }
 
     pub fn change_admin_pin(&mut self, current: &str, new: &str) -> Result<()> {
@@ -199,7 +249,7 @@ impl Store {
                 row.get(0)
             })?;
         ensure!(
-            valid_pin(current) && matches_pin(current, &stored)?,
+            valid_pin(current) && matches_secret(current, &stored)?,
             "Неправильний поточний PIN"
         );
         tx.execute(
@@ -626,6 +676,21 @@ fn customer_bonus(conn: &Connection, id: i64) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cashier_credentials_are_created_once_and_verified() -> Result<()> {
+        let store = Store::open(Path::new(":memory:"))?;
+        assert!(!store.has_cashier_account()?);
+        assert!(store.create_cashier("admin", "password123").is_err());
+        assert!(store.create_cashier("ostal", "short").is_err());
+        store.create_cashier("Касир", "password123")?;
+        assert!(store.has_cashier_account()?);
+        assert!(store.create_cashier("other", "password456").is_err());
+        assert!(store.verify_cashier("касир", "password123")?);
+        assert!(!store.verify_cashier("касир", "password456")?);
+        assert!(!store.verify_cashier("other", "password123")?);
+        Ok(())
+    }
 
     #[test]
     fn split_tender_and_bonus_are_committed_and_reversed_with_sale() -> Result<()> {

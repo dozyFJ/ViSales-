@@ -231,6 +231,9 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 if rail_button(ui, &palette, "Оновлення", false) {
                     app.check_updates();
                 }
+                if rail_button(ui, &palette, "Заблокувати", false) {
+                    app.lock_screen();
+                }
                 if rail_button(
                     ui,
                     &palette,
@@ -250,7 +253,7 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
     egui::CentralPanel::default()
         .frame(Frame::new().fill(palette.grid).inner_margin(4))
         .show(ctx, |ui| {
-            if app.store.is_none() {
+            if app.store.is_none() || !app.login.authenticated {
                 return;
             }
             if app.page != 0 {
@@ -624,6 +627,7 @@ mod tests {
     fn portrait_chrome_stays_in_place_when_notice_and_total_change() -> anyhow::Result<()> {
         let directory = std::env::temp_dir().join(format!("visales-layout-{}", std::process::id()));
         let mut app = ViSales::open(directory.clone());
+        app.login.authenticated = true;
         for width in [320., 360., 430.] {
             let ctx = egui::Context::default();
             let frame = |app: &mut ViSales| {
@@ -692,6 +696,7 @@ mod tests {
             std::env::temp_dir().join(format!("visales-portrait-{}", std::process::id())),
         );
         let directory = app.directory.clone();
+        app.login.authenticated = true;
         app.store = Some(store);
         app.refresh()?;
         let mut frame = |events| {
