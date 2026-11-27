@@ -15,8 +15,8 @@ pub fn run(directory: PathBuf, options: eframe::NativeOptions) -> eframe::Result
         "ViSales",
         options,
         Box::new(move |context| {
-            context.egui_ctx.set_visuals(ui::visuals(ui::DEFAULT_DARK));
             let app = ui::ViSales::open(directory);
+            context.egui_ctx.set_visuals(ui::visuals(app.dark));
             #[cfg(target_os = "android")]
             let app = app.with_android_app(android_app);
             Ok(Box::new(app))

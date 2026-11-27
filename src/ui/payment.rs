@@ -130,17 +130,11 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                     {
                         let ui = &mut columns[index];
                         let active = form.mode == mode;
-                        let button =
-                            Button::new(egui::RichText::new(label).strong().color(if active {
-                                super::theme::BLACK
-                            } else {
-                                ui.visuals().text_color()
-                            }))
-                            .fill(if active {
-                                super::theme::SIGNAL
-                            } else {
-                                ui.visuals().window_fill
-                            });
+                        let palette = super::theme::Palette::new(app.dark);
+                        let (fill, ink, border) = palette.navigation(palette.rail, active);
+                        let button = Button::new(egui::RichText::new(label).strong().color(ink))
+                            .fill(fill)
+                            .stroke(egui::Stroke::new(2.0_f32, border));
                         if ui.add_sized([ui.available_width(), 42.], button).clicked() {
                             form.mode = mode;
                         }
@@ -189,7 +183,15 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                 }
                 ui.horizontal_wrapped(|ui| {
                     if ui
-                        .add_enabled(result.is_ok(), Button::new("Записати тестовий продаж"))
+                        .add_enabled(
+                            result.is_ok(),
+                            Button::new(
+                                egui::RichText::new("Записати тестовий продаж")
+                                    .strong()
+                                    .color(super::theme::BLACK),
+                            )
+                            .fill(super::theme::Palette::new(app.dark).action),
+                        )
                         .clicked()
                     {
                         action = result.ok().map(|(payment, _)| payment);

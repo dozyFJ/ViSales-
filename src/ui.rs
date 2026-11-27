@@ -60,7 +60,7 @@ pub struct ViSales {
     cash_menu_open: bool,
     settings_menu_open: bool,
     stock_menu_open: bool,
-    dark: bool,
+    pub(crate) dark: bool,
     search: String,
     catalog_search: String,
     barcode: String,
@@ -139,6 +139,12 @@ impl ViSales {
         };
         match store {
             Ok(store) => {
+                match store.dark_theme() {
+                    Ok(dark) => app.dark = dark.unwrap_or(DEFAULT_DARK),
+                    Err(error) => {
+                        app.notice = Some((false, format!("Не вдалося прочитати тему: {error}")))
+                    }
+                }
                 app.store = Some(store);
                 if let Err(error) = app.refresh() {
                     app.notice = Some((false, format!("{error:#}")));
@@ -885,6 +891,18 @@ impl ViSales {
         self.navigate(0);
     }
 
+    fn toggle_theme(&mut self, ctx: &egui::Context) {
+        let dark = !self.dark;
+        if let Some(store) = &self.store {
+            if let Err(error) = store.set_dark_theme(dark) {
+                self.notice = Some((false, format!("Не вдалося зберегти тему: {error}")));
+                return;
+            }
+        }
+        self.dark = dark;
+        ctx.set_visuals(visuals(dark));
+    }
+
     fn desktop_nav(&mut self, ui: &mut Ui) {
         if ui.small_button("Заблокувати").clicked() {
             self.lock_screen();
@@ -907,8 +925,7 @@ impl ViSales {
             })
             .clicked()
         {
-            self.dark = !self.dark;
-            ui.ctx().set_visuals(visuals(self.dark));
+            self.toggle_theme(ui.ctx());
         }
     }
 }
@@ -932,7 +949,7 @@ impl eframe::App for ViSales {
                 }
             }
         }
-        if mobile::startup_splash(ctx, self.splash_started.elapsed().as_secs_f32()) {
+        if mobile::startup_splash(ctx, self.splash_started.elapsed().as_secs_f32(), self.dark) {
             return;
         }
         if !self.login.authenticated {

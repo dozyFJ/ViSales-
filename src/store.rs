@@ -173,6 +173,25 @@ impl Store {
         Ok(Self(conn))
     }
 
+    pub fn dark_theme(&self) -> Result<Option<bool>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .0
+            .query_row("SELECT dark FROM appearance WHERE id=1", [], |row| {
+                row.get(0)
+            })
+            .optional()?)
+    }
+
+    pub fn set_dark_theme(&self, dark: bool) -> Result<()> {
+        self.0.execute(
+            "INSERT INTO appearance(id,dark) VALUES(1,?1)
+            ON CONFLICT(id) DO UPDATE SET dark=excluded.dark",
+            [dark],
+        )?;
+        Ok(())
+    }
+
     pub fn has_cashier_account(&self) -> Result<bool> {
         Ok(self
             .0
@@ -725,6 +744,23 @@ fn customer_bonus(conn: &Connection, id: i64) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_is_read_back_after_reopening_database() -> Result<()> {
+        let path =
+            std::env::temp_dir().join(format!("visales-appearance-{}.db", std::process::id()));
+        let store = Store::open(&path)?;
+        assert_eq!(store.dark_theme()?, None);
+        store.set_dark_theme(true)?;
+        drop(store);
+        let reopened = Store::open(&path)?;
+        assert_eq!(reopened.dark_theme()?, Some(true));
+        reopened.set_dark_theme(false)?;
+        assert_eq!(reopened.dark_theme()?, Some(false));
+        drop(reopened);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
 
     #[test]
     fn old_single_cashier_is_migrated_with_its_password() -> Result<()> {

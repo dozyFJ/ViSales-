@@ -147,11 +147,21 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                                 };
                                 let button =
                                     Button::new(RichText::new(title).strong().color(theme::BLACK))
-                                        .fill(theme::SIGNAL)
+                                        .fill(theme::Palette::new(app.dark).action)
                                         .stroke(egui::Stroke::new(2.0_f32, theme::BLACK))
                                         .min_size(egui::vec2(ui.available_width(), 42.));
                                 submit =
                                     ui.add_enabled(enabled, button).clicked() || (enabled && enter);
+                                if ui
+                                    .small_button(if app.dark {
+                                        "Світла тема"
+                                    } else {
+                                        "Темна тема"
+                                    })
+                                    .clicked()
+                                {
+                                    app.toggle_theme(ctx);
+                                }
                             });
                     });
                 });

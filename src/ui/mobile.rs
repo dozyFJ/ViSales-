@@ -1,6 +1,6 @@
 //! Layout adapted from ffight763-glitch/Vinteria-git3, src/ui/mobile.rs (204bdd9).
 
-use super::{PAGES, ViSales, theme, visuals};
+use super::{PAGES, ViSales, theme};
 use eframe::egui::{self, Button, Color32, Frame, Margin, RichText, Stroke};
 
 const TOUCH: f32 = 46.;
@@ -26,8 +26,7 @@ pub(super) fn shell(app: &mut ViSales, ctx: &egui::Context, bottom_tabs: bool) {
                         "Темна тема"
                     };
                     if ui.add_sized([98., TOUCH], Button::new(label)).clicked() {
-                        app.dark = !app.dark;
-                        ctx.set_visuals(visuals(app.dark));
+                        app.toggle_theme(ctx);
                     }
                 });
             });
@@ -76,22 +75,11 @@ fn accent(dark: bool) -> Color32 {
 
 fn tab(app: &mut ViSales, ui: &mut egui::Ui, index: usize, label: &str, height: f32) {
     let active = index == app.page;
-    let widgets = &ui.visuals().widgets;
-    let button = Button::new(RichText::new(label).size(13.).strong().color(if active {
-        theme::BLACK
-    } else {
-        ui.visuals().text_color()
-    }))
-    .fill(if active {
-        theme::SIGNAL
-    } else {
-        widgets.inactive.bg_fill
-    })
-    .stroke(if active {
-        Stroke::new(1.0_f32, accent(app.dark))
-    } else {
-        widgets.inactive.bg_stroke
-    });
+    let palette = theme::Palette::new(app.dark);
+    let (fill, ink, border) = palette.navigation(palette.rail, active);
+    let button = Button::new(RichText::new(label).size(13.).strong().color(ink))
+        .fill(fill)
+        .stroke(Stroke::new(2.0_f32, border));
     if ui
         .add_sized([ui.available_width(), height], button)
         .clicked()
@@ -118,14 +106,15 @@ pub(super) fn pills(ui: &mut egui::Ui, selected: &mut usize, labels: &[&str], da
     });
 }
 
-pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
+pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32, dark: bool) -> bool {
     const DURATION: f32 = 0.46;
     if elapsed >= DURATION || !cfg!(target_os = "android") {
         return false;
     }
 
+    let palette = theme::Palette::new(dark);
     egui::CentralPanel::default()
-        .frame(Frame::new().fill(theme::Palette::new(false).grid))
+        .frame(Frame::new().fill(palette.grid))
         .show(ctx, |ui| {
             let center = ui.max_rect().center();
             let painter = ui.painter();
@@ -134,7 +123,7 @@ pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
                 egui::Align2::CENTER_CENTER,
                 "ViSales",
                 egui::FontId::proportional(35.),
-                theme::BLACK,
+                palette.ink,
             );
             for dot in 0..8 {
                 let offset = dot as f32 / 8.;
@@ -145,7 +134,7 @@ pub(super) fn startup_splash(ctx: &egui::Context, elapsed: f32) -> bool {
                 painter.circle_filled(
                     point,
                     1.5 + phase,
-                    theme::BLACK.linear_multiply(0.3 + 0.7 * phase),
+                    palette.ink.linear_multiply(0.3 + 0.7 * phase),
                 );
             }
         });

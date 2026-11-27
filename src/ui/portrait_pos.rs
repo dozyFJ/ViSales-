@@ -1,7 +1,6 @@
 use super::{
     PAGES, ViSales, admin, matches, money,
     theme::{self, Palette},
-    visuals,
 };
 use crate::store::Product;
 use eframe::egui::{self, Button, Color32, Frame, Label, RichText, Stroke, TextEdit};
@@ -44,18 +43,19 @@ pub(super) fn show(app: &mut ViSales, ctx: &egui::Context) {
                     } else {
                         role.to_owned()
                     };
-                    ui.label(RichText::new(label).size(10.).strong());
+                    ui.label(RichText::new(label).size(10.).strong().color(palette.muted));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let cart = app.page == 0 && app.portrait_search == Search::Cart;
                     let quantity: i64 = app.cart.values().map(|(quantity, _)| quantity).sum();
+                    let (fill, ink, border) = palette.navigation(theme::MINT, cart);
                     let button = Button::new(
                         RichText::new(format!("Кошик · {quantity}"))
                             .strong()
-                            .color(theme::BLACK),
+                            .color(ink),
                     )
-                    .fill(if cart { palette.action } else { theme::MINT })
-                    .stroke(Stroke::new(2.0_f32, theme::BLACK))
+                    .fill(fill)
+                    .stroke(Stroke::new(2.0_f32, border))
                     .min_size(egui::vec2(0., 39.));
                     if ui.add(button).clicked() {
                         app.navigate(0);
@@ -261,13 +261,10 @@ fn dock_button(
     accent: Color32,
     active: bool,
 ) -> bool {
-    let fill = if active { palette.action } else { accent };
-    let button = Button::new(RichText::new(label).strong().color(theme::BLACK))
+    let (fill, ink, border) = palette.navigation(accent, active);
+    let button = Button::new(RichText::new(label).strong().color(ink))
         .fill(fill)
-        .stroke(Stroke::new(
-            if active { 3.0_f32 } else { 2.0_f32 },
-            theme::BLACK,
-        ))
+        .stroke(Stroke::new(if active { 3.0_f32 } else { 2.0_f32 }, border))
         .truncate();
     ui.add_sized([ui.available_width(), 42.], button).clicked()
 }
@@ -403,8 +400,7 @@ fn menu_drawer(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search
                                 },
                                 false,
                             ) {
-                                app.dark = !app.dark;
-                                ctx.set_visuals(visuals(app.dark));
+                                app.toggle_theme(ctx);
                                 close = true;
                             }
                         });
@@ -427,16 +423,10 @@ fn nav_button(
     active: bool,
 ) -> bool {
     let label = label.into();
-    let transition = ui
-        .ctx()
-        .animate_bool_with_time(ui.make_persistent_id(&label), active, 0.12);
-    let ink = palette.ink.lerp_to_gamma(theme::BLACK, transition);
+    let (fill, ink, border) = palette.navigation(palette.grid, active);
     let button = Button::new(RichText::new(label).size(12.).strong().color(ink))
-        .fill(palette.grid.lerp_to_gamma(palette.action, transition))
-        .stroke(Stroke::new(
-            2.0_f32,
-            if active { theme::BLACK } else { palette.line },
-        ));
+        .fill(fill)
+        .stroke(Stroke::new(2.0_f32, border));
     ui.add_sized([ui.available_width(), 42.], button).clicked()
 }
 
@@ -726,7 +716,7 @@ fn product_card(ui: &mut egui::Ui, palette: &Palette, product: &Product, size: e
         palette.rail
     };
     let fill = if clickable && response.hovered() {
-        surface.lerp_to_gamma(palette.action, 0.18)
+        surface.lerp_to_gamma(if light { palette.action } else { palette.ink }, 0.12)
     } else {
         surface
     };
@@ -762,7 +752,7 @@ fn product_card(ui: &mut egui::Ui, palette: &Palette, product: &Product, size: e
         .selectable(false),
     );
     details.add(
-        Label::new(RichText::new(&stock).weak())
+        Label::new(RichText::new(&stock).color(palette.muted))
             .truncate()
             .selectable(false),
     );
@@ -924,7 +914,7 @@ mod tests {
     #[test]
     fn portrait_list_adds_a_product_and_keeps_checkout_below_it() -> anyhow::Result<()> {
         let ctx = egui::Context::default();
-        ctx.set_visuals(visuals(true));
+        ctx.set_visuals(crate::ui::visuals(true));
         let mut store = Store::open(Path::new(":memory:"))?;
         store.save_products(&[Product {
             id: 0,
