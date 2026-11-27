@@ -329,13 +329,16 @@ fn menu_drawer(app: &mut ViSales, ctx: &egui::Context, palette: &Palette, search
                                 }
                             }
                             #[cfg(target_os = "android")]
-                            ui.add_enabled_ui(!app.scanning && app.store.is_some(), |ui| {
-                                if nav_button(ui, palette, "Сканер", false) {
-                                    app.navigate(0);
-                                    app.start_camera(ctx);
-                                    close = true;
-                                }
-                            });
+                            ui.add_enabled_ui(
+                                app.scan_target.is_none() && app.store.is_some(),
+                                |ui| {
+                                    if nav_button(ui, palette, "Сканер", false) {
+                                        app.navigate(0);
+                                        app.start_camera(ctx, super::ScanTarget::Cart);
+                                        close = true;
+                                    }
+                                },
+                            );
                         });
                     }
                     if app.access.unlocked {
@@ -810,12 +813,12 @@ mod tests {
         app.store()?.add_demo_products()?;
         app.refresh()?;
         let ctx = egui::Context::default();
-        let frame = |app: &mut ViSales| {
+        let frame = |app: &mut ViSales, height| {
             ctx.run(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
-                        egui::vec2(320., 460.),
+                        egui::vec2(320., height),
                     )),
                     ..Default::default()
                 },
@@ -835,10 +838,64 @@ mod tests {
             (6, "Касири"),
         ] {
             app.navigate(page);
-            let _ = frame(&mut app);
-            assert!(contains(&frame(&mut app), expected), "{page}: {expected}");
+            let _ = frame(&mut app, 460.);
+            assert!(
+                contains(&frame(&mut app, 460.), expected),
+                "{page}: {expected}"
+            );
         }
+        for (page, labels) in [
+            (
+                1,
+                &[
+                    "Штрихкод",
+                    "Назва товару",
+                    "Категорія",
+                    "Собівартість, грн",
+                    "Ціна продажу, грн",
+                    "Зберегти товар",
+                ][..],
+            ),
+            (2, &["Фактична кількість", "Зберегти залишок"][..]),
+            (
+                3,
+                &[
+                    "Назва постачальника",
+                    "Номер накладної",
+                    "Закупівельна ціна, грн",
+                    "Оприбуткувати",
+                ][..],
+            ),
+            (5, &["Експортувати XLSX"][..]),
+            (6, &["Пароль касира", "Додати касира"][..]),
+        ] {
+            app.navigate(page);
+            let _ = frame(&mut app, 700.);
+            let output = frame(&mut app, 700.);
+            for label in labels {
+                assert!(
+                    output.shapes.iter().any(|shape| {
+                        matches!(&shape.shape, egui::Shape::Text(text)
+                        if text.galley.text() == *label
+                            && shape.clip_rect.contains(text.pos)
+                            && shape.clip_rect.contains(text.pos + text.galley.size()))
+                    }),
+                    "page {page}: {label} is missing or clipped"
+                );
+            }
+        }
+        app.navigate(1);
+        app.name = "Назва з чернетки".into();
+        app.price = "49,90".into();
+        app.apply_camera_scan(super::super::ScanTarget::Catalog, "0001234567890", 0.);
+        assert_eq!(app.barcode, "0001234567890");
+        assert_eq!(app.name, "Назва з чернетки");
+        assert_eq!(app.price, "49,90");
+        assert!(app.cart.is_empty());
         app.navigate(0);
+        app.apply_camera_scan(super::super::ScanTarget::Cart, "0001234567890", 0.);
+        assert_eq!(app.search, "0001234567890");
+        app.search.clear();
         for (mode, expected) in [
             (Search::Browse, "Назва або код"),
             (Search::Barcode, "Штрихкод"),
@@ -848,8 +905,8 @@ mod tests {
             (Search::Receipts, "Тестові чеки"),
         ] {
             app.portrait_search = mode;
-            let _ = frame(&mut app);
-            assert!(contains(&frame(&mut app), expected), "{expected}");
+            let _ = frame(&mut app, 460.);
+            assert!(contains(&frame(&mut app, 460.), expected), "{expected}");
         }
         drop(app);
         std::fs::remove_dir_all(directory)?;

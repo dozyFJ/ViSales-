@@ -31,6 +31,13 @@ pub fn visuals(dark: bool) -> egui::Visuals {
     theme::visuals(dark)
 }
 
+#[cfg(any(target_os = "android", test))]
+#[derive(Clone, Copy)]
+enum ScanTarget {
+    Cart,
+    Catalog,
+}
+
 pub struct ViSales {
     directory: PathBuf,
     splash_started: std::time::Instant,
@@ -51,7 +58,7 @@ pub struct ViSales {
     #[cfg(target_os = "android")]
     android_app: Option<winit::platform::android::activity::AndroidApp>,
     #[cfg(target_os = "android")]
-    scanning: bool,
+    scan_target: Option<ScanTarget>,
     portrait_search: portrait_pos::Search,
     page: usize,
     access: admin::Access,
@@ -110,7 +117,7 @@ impl ViSales {
             #[cfg(target_os = "android")]
             android_app: None,
             #[cfg(target_os = "android")]
-            scanning: false,
+            scan_target: None,
             portrait_search: portrait_pos::Search::Browse,
             page: 0,
             access: admin::Access::default(),
@@ -199,8 +206,8 @@ impl ViSales {
     }
 
     #[cfg(target_os = "android")]
-    fn start_camera(&mut self, ctx: &egui::Context) {
-        if self.scanning || self.store.is_none() {
+    fn start_camera(&mut self, ctx: &egui::Context, target: ScanTarget) {
+        if self.scan_target.is_some() || self.store.is_none() {
             return;
         }
         if self
@@ -208,7 +215,7 @@ impl ViSales {
             .as_ref()
             .is_some_and(|app| crate::android_scanner::start(app).is_ok())
         {
-            self.scanning = true;
+            self.scan_target = Some(target);
             ctx.request_repaint();
         } else {
             self.notice = Some((false, "Не вдалося запустити сканер".into()));
@@ -217,9 +224,9 @@ impl ViSales {
 
     #[cfg(target_os = "android")]
     fn poll_camera(&mut self, ctx: &egui::Context) {
-        if !self.scanning {
+        let Some(target) = self.scan_target else {
             return;
-        }
+        };
         let Some(app) = &self.android_app else {
             return;
         };
@@ -231,9 +238,9 @@ impl ViSales {
             Ok(Some(result)) => result,
             Err(_) => "error:Не вдалося прочитати результат сканування".into(),
         };
-        self.scanning = false;
+        self.scan_target = None;
         if let Some(barcode) = result.strip_prefix("code:") {
-            self.receive_scan(barcode, ctx.input(|input| input.time));
+            self.apply_camera_scan(target, barcode, ctx.input(|input| input.time));
         } else if let Some(error) = result.strip_prefix("error:") {
             self.notice = Some((false, error.into()));
         }
@@ -264,10 +271,10 @@ impl ViSales {
         }
         #[cfg(target_os = "android")]
         if ui
-            .add_enabled(!self.scanning, egui::Button::new("Сканер"))
+            .add_enabled(self.scan_target.is_none(), egui::Button::new("Сканер"))
             .clicked()
         {
-            self.start_camera(ui.ctx());
+            self.start_camera(ui.ctx(), ScanTarget::Cart);
         }
         let search = ui.add(
             TextEdit::singleline(&mut self.search)
@@ -364,6 +371,22 @@ impl ViSales {
     }
 
     #[cfg(any(target_os = "android", test))]
+    fn apply_camera_scan(&mut self, target: ScanTarget, barcode: &str, time: f64) {
+        match target {
+            ScanTarget::Cart if self.login.authenticated && self.page == 0 => {
+                self.receive_scan(barcode, time);
+            }
+            ScanTarget::Catalog
+                if self.login.authenticated && self.access.unlocked && self.page == 1 =>
+            {
+                self.barcode = barcode.into();
+                self.notice = Some((true, "Штрихкод зчитано".into()));
+            }
+            _ => {}
+        }
+    }
+
+    #[cfg(any(target_os = "android", test))]
     fn receive_scan(&mut self, barcode: &str, time: f64) {
         self.search = barcode.into();
         self.notice = None;
@@ -449,7 +472,11 @@ impl ViSales {
         }
         card(ui, |ui| {
             ui.heading("Картка товару");
-            ui.horizontal_wrapped(|ui| {
+            #[cfg(target_os = "android")]
+            if ui.button("Сканувати штрихкод").clicked() {
+                self.start_camera(ui.ctx(), ScanTarget::Catalog);
+            }
+            form_layout(ui, |ui| {
                 field(ui, &mut self.barcode, "Штрихкод");
                 field(ui, &mut self.name, "Назва товару");
                 field(ui, &mut self.product_category, "Категорія");
@@ -476,6 +503,7 @@ impl ViSales {
         });
         ui.add(
             TextEdit::singleline(&mut self.catalog_search)
+                .desired_width(f32::INFINITY)
                 .hint_text("Пошук за назвою чи штрихкодом"),
         );
         let query = self.catalog_search.trim().to_lowercase();
@@ -524,7 +552,7 @@ impl ViSales {
     fn stock(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
             ui.heading("Перерахунок залишку");
-            ui.horizontal_wrapped(|ui| {
+            form_layout(ui, |ui| {
                 product_select(ui, "count-product", &self.products, &mut self.product);
                 field(ui, &mut self.amount, "Фактична кількість");
                 if ui.button("Зберегти залишок").clicked() {
@@ -583,7 +611,7 @@ impl ViSales {
     fn supplies(&mut self, ui: &mut Ui) {
         card(ui, |ui| {
             ui.heading("Постачальники");
-            ui.horizontal_wrapped(|ui| {
+            form_layout(ui, |ui| {
                 field(ui, &mut self.supplier_name, "Назва постачальника");
                 if ui.button("Додати постачальника").clicked() {
                     let result = (|| {
@@ -607,9 +635,11 @@ impl ViSales {
         };
         card(ui, |ui| {
             ui.heading("Надходження за накладною");
-            ui.horizontal_wrapped(|ui| {
+            form_layout(ui, |ui| {
                 let supplier = suppliers.iter().find(|(id, _)| *id == self.supplier);
                 egui::ComboBox::from_id_salt("supplier")
+                    .width(ui.available_width().min(250.))
+                    .truncate()
                     .selected_text(
                         supplier
                             .map(|(_, name)| name.as_str())
@@ -1038,10 +1068,24 @@ fn card(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
         .show(ui, content);
 }
 
+fn form_layout(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
+    if ui.available_width() < 1150. {
+        ui.set_min_width(ui.available_width());
+        ui.vertical(content);
+    } else {
+        ui.horizontal_wrapped(content);
+    }
+}
+
 fn field(ui: &mut Ui, value: &mut String, label: &str) {
+    let width = if ui.layout().is_vertical() {
+        f32::INFINITY
+    } else {
+        148.
+    };
     ui.vertical(|ui| {
         ui.label(label);
-        ui.add(TextEdit::singleline(value).desired_width(148.));
+        ui.add(TextEdit::singleline(value).desired_width(width));
     });
 }
 
